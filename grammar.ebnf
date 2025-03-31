@@ -1,0 +1,80 @@
+Program       ::= { Statement } EOF ;
+
+(* Statements *)
+Statement     ::= ConstDecl 
+                | LetDecl 
+                | FnDecl 
+                | ExprStmt
+                | ReturnStmt 
+                | ForLoop 
+                | IfStmt 
+                | SwitchStmt
+                | BreakStmt 
+                | ContinueStmt 
+                | TypeDecl
+                | ImportStmt ;
+
+ImportStmt    ::= "import" STRING [ "as" IDENTIFIER ] ";" ;
+ConstDecl     ::= "const" IDENTIFIER ":" Type "=" Expr ";" ;
+LetDecl       ::= "let" IDENTIFIER ":" Type "=" Expr ";" ;
+FnDecl        ::= "fn" IDENTIFIER "(" [Params] ")" "->" Type Block ;
+TypeDecl      ::= "type" IDENTIFIER "=" (StructType | InterfaceType | TypeAlias) ";" ;
+ExprStmt      ::= Expr ";" ;
+
+(* Control Flow *)
+ForLoop       ::= "for" [ "(" [ Init ] ";" [ Condition ] ";" [ Post ] ")" ] Block ;
+Init          ::= LetDecl | ExprStmt ;
+Condition     ::= Expr ;
+Post          ::= Assign | Unary ;
+
+IfStmt        ::= "if" ( Condition | LetDecl ) Block [ "else" ( Block | IfStmt ) ] ;
+SwitchStmt    ::= "switch" Expr "{" { Case } "}" ;
+Case          ::= "case" Expr ":" Block | "default" ":" Block ;
+
+BreakStmt     ::= "break" ";" ;
+ContinueStmt  ::= "continue" ";" ;
+ReturnStmt    ::= "return" [ Expr ] ";" ;
+
+(* Types *)
+Type          ::= PrimitiveType | IDENTIFIER | StructType | InterfaceType ;
+PrimitiveType ::= "Light" | "Lumens" | "Umbra" ;
+StructType    ::= "struct" "{" { FieldDecl } "}" ;
+InterfaceType ::= "interface" "{" { MethodSig } "}" ;
+TypeAlias     ::= Type ;
+FieldDecl     ::= IDENTIFIER ":" Type ";" ;
+MethodSig     ::= IDENTIFIER "(" [Params] ")" "->" Type ";" ;
+Params        ::= Param { "," Param } ;
+Param         ::= IDENTIFIER ":" Type ;
+
+(* Expressions *)
+Expr          ::= Assign ;
+Assign        ::= Ternary [ "=" Assign ] ;
+Ternary       ::= OrExpr [ "?" Expr ":" Expr ] ;
+OrExpr        ::= AndExpr { "||" AndExpr } ;
+AndExpr       ::= Equality { "&&" Equality } ;
+Equality      ::= Relational { ("==" | "!=") Relational } ;
+Relational    ::= Additive { ("<" | ">" | "<=" | ">=") Additive } ;
+Additive      ::= Multiplicative { ("+" | "-") Multiplicative } ;
+Multiplicative::= Unary { ("*" | "/" | "%") Unary } ;
+Unary         ::= ("!" | "-") Unary | Postfix ;
+Postfix       ::= Primary { PostfixOp } ;
+PostfixOp     ::= "." IDENTIFIER | Call ;
+Call          ::= "(" [Args] ")" ;
+Primary       ::= IDENTIFIER | Literal | "(" Expr ")" ;
+
+Args          ::= Expr { "," Expr } ;
+
+(* Literals *)
+Literal       ::= NUMBER | STRING | "true" | "false" | UmbraLiteral | StructLiteral ;
+UmbraLiteral  ::= "#" "Umbra" ;
+StructLiteral ::= IDENTIFIER "{" [ FieldInit { "," FieldInit } ] "}" ;
+FieldInit     ::= IDENTIFIER "=" Expr ;
+
+(* Blocks *)
+Block         ::= "{" { Statement } "}" ;
+
+(* Lexical Tokens *)
+IDENTIFIER    ::= [a-zA-Z_] [a-zA-Z0-9_]* ;
+NUMBER        ::= [0-9]+ ( "." [0-9]+ )? ;
+STRING        ::= '"' ( [^"\n"] | "\\" . )* '"' ;
+EOF           ::= ;
