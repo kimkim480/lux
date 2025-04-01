@@ -8,6 +8,19 @@ POST TENEBRAS LUX
 
 ---
 
+## What is Lux?
+
+- Lux is a statically typed, stack-based programming language designed for learning and exploration.
+- It is built from scratch in Rust with a custom virtual machine called Prism.
+- Its purpose: to shine light through the chaos of runtime errors — with clarity, intention, and precision.
+
+## Goals of Lux
+
+- **Clarity** over cleverness
+- **Static typing** from the ground up
+- **Minimalist syntax**, inspired by light and structure
+- Built to **learn**, not necessarily to ship
+
 ## Primitive Types in Lux
 
 | Lux Type | Conventional Equivalent | Purpose                        | "Why This Name?"                             |
