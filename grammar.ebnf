@@ -18,7 +18,7 @@ ImportStmt    ::= "import" STRING [ "as" IDENTIFIER ] ";" ;
 ConstDecl     ::= "const" IDENTIFIER ":" Type "=" Expr ";" ;
 LetDecl       ::= "let" IDENTIFIER ":" Type "=" Expr ";" ;
 FnDecl        ::= "fn" IDENTIFIER "(" [Params] ")" "->" Type Block ;
-TypeDecl      ::= "type" IDENTIFIER "=" (StructType | InterfaceType | TypeAlias) ";" ;
+TypeDecl      ::= "typedef" IDENTIFIER "=" (StructType | InterfaceType | TypeAlias) ";" ;
 ExprStmt      ::= Expr ";" ;
 
 (* Control Flow *)
@@ -37,7 +37,7 @@ ReturnStmt    ::= "return" [ Expr ] ";" ;
 
 (* Types *)
 Type          ::= PrimitiveType | IDENTIFIER | StructType | InterfaceType ;
-PrimitiveType ::= "Light" | "Lumens" | "Umbra" ;
+PrimitiveType ::= "Light" | "Lumens" | "Umbra" | "Photon" ;
 StructType    ::= "struct" "{" { FieldDecl } "}" ;
 InterfaceType ::= "interface" "{" { MethodSig } "}" ;
 TypeAlias     ::= Type ;

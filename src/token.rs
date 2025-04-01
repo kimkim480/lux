@@ -2,11 +2,9 @@
 pub enum TokenKind {
     // Single-character tokens
     Plus,       // +
-    Minus,      // -
     Star,       // *
     Slash,      // /
     Percent,    // %
-    Equal,      // =
     Colon,      // :
     Semicolon,  // ;
     Comma,      // ,
@@ -17,12 +15,18 @@ pub enum TokenKind {
     RightBrace, // }
 
     // One or two character tokens
+    Minus,        // -
+    Arrow,        // ->
+    Equal,        // =
     EqualEqual,   // ==
+    Bang,         // !
     BangEqual,    // !=
     Less,         // <
     LessEqual,    // <=
     Greater,      // >
     GreaterEqual, // >=
+    AndAnd,       // &&
+    OrOr,         // ||
     Question,     // ?
 
     // Literals
@@ -38,7 +42,6 @@ pub enum TokenKind {
     If,
     Else,
     For,
-    While,
     Switch,
     Case,
     Default,
@@ -49,13 +52,14 @@ pub enum TokenKind {
     Umbra,
     Light,
     Lumens,
-    Type,
+    Photon,
+    Typedef,
     Struct,
     Interface,
     Import,
     As,
 
-    // End of file
+    Error(String),
     EOF,
 }
 
