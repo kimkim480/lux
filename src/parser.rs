@@ -163,6 +163,13 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
+    fn parse_emit(&mut self) -> Result<Stmt, ParseError> {
+        self.consume_token(TokenKind::Emit, "Expected 'emit' keyword")?;
+        let expr = self.parse_expr()?;
+        self.consume_token(TokenKind::Semicolon, "Expected ';' after emit")?;
+        Ok(Stmt::EmitStmt(expr))
+    }
+
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         self.parse_precedence(Precedence::Assignment)
     }
@@ -237,7 +244,16 @@ impl<'a> Parser<'a> {
         match &self.previous.kind {
             TokenKind::True => Ok(Expr::Bool(true)),
             TokenKind::False => Ok(Expr::Bool(false)),
+            TokenKind::Umbra => Ok(Expr::Umbra),
             _ => Err(ParseError::new("Expected literal", &self.previous)),
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<Expr, ParseError> {
+        if let TokenKind::String(ref s) = self.previous.kind {
+            Ok(Expr::String(s.clone()))
+        } else {
+            Err(ParseError::new("Expected string", &self.previous))
         }
     }
 
@@ -281,6 +297,7 @@ impl<'a> Parser<'a> {
     fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
         match self.peek().kind {
             TokenKind::Let => self.parse_let(),
+            TokenKind::Emit => self.parse_emit(),
             _ => self.parse_expr_stmt(),
         }
     }
@@ -382,6 +399,16 @@ impl<'a> Parser<'a> {
             },
             False => ParseRule {
                 prefix: Some(Parser::parse_literal),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            Umbra => ParseRule {
+                prefix: Some(Parser::parse_literal),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            String(_) => ParseRule {
+                prefix: Some(Parser::parse_string),
                 infix: None,
                 precedence: Precedence::None,
             },

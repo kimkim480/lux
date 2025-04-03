@@ -1,6 +1,14 @@
 use crate::compiler::{Chunk, Op};
 use crate::value::Value;
 
+pub type PrismResult<T> = Result<T, PrismError>;
+
+#[derive(Debug)]
+pub enum PrismError {
+    Compile(String),
+    Runtime(String),
+}
+
 pub struct Prism {
     ip: usize, // instruction pointer
     stack: Vec<Value>,
@@ -29,9 +37,9 @@ impl Prism {
         println!();
     }
 
-    fn binary_op(&mut self, op: Op) -> Option<Value> {
-        let b = self.stack.pop()?;
-        let a = self.stack.pop()?;
+    fn binary_op(&mut self, op: Op) -> Result<Value, PrismError> {
+        let b = self.pop()?;
+        let a = self.pop()?;
 
         let result = match (a, b) {
             (Value::Light(a), Value::Light(b)) => match op {
@@ -44,22 +52,46 @@ impl Prism {
                 Op::LessEqual => Value::Photon(a <= b),
                 Op::Greater => Value::Photon(a > b),
                 Op::GreaterEqual => Value::Photon(a >= b),
-                _ => return None,
+                _ => {
+                    return Err(PrismError::Runtime(
+                        "Unsupported types for binary operation".to_string(),
+                    ));
+                }
             },
-            _ => return None,
+
+            (Value::Lumens(a), Value::Lumens(b)) => match op {
+                Op::Add => Value::Lumens(a + &b),
+                _ => {
+                    return Err(PrismError::Runtime(
+                        "Unsupported types for binary operation".to_string(),
+                    ));
+                }
+            },
+
+            _ => {
+                return Err(PrismError::Runtime(
+                    "Unsupported types for binary operation".to_string(),
+                ));
+            }
         };
 
         self.stack.push(result.clone());
-        Some(result)
+        Ok(result)
     }
 
-    pub fn run(&mut self) -> Option<Value> {
+    fn pop(&mut self) -> Result<Value, PrismError> {
+        self.stack
+            .pop()
+            .ok_or_else(|| PrismError::Runtime("Stack underflow".into()))
+    }
+
+    pub fn run(&mut self) -> PrismResult<()> {
         use Op::*;
 
         while self.ip < self.chunk.code.len() {
             let op = &self.chunk.code[self.ip];
             self.ip += 1;
-            println!("🔹 [op] {:?}", op);
+            // println!("🔹 [op] {:?}", op);
 
             match op {
                 Const(index) => {
@@ -69,44 +101,55 @@ impl Prism {
                 Add | Sub | Mul | Div | Rem | Less | LessEqual | Greater | GreaterEqual => {
                     self.binary_op(op.clone())?;
                 }
-                Return => {
-                    return self.stack.pop();
-                }
                 Negate => {
-                    let a = self.stack.pop()?;
+                    let a = self.pop()?;
                     match a {
                         Value::Light(a) => self.stack.push(Value::Light(-a)),
                         _ => {
                             eprintln!("Runtime error: unsupported types for Negate");
-                            return None;
+                            return Err(PrismError::Runtime(
+                                "Unsupported types for Negate".to_string(),
+                            ));
                         }
                     }
                 }
                 Not => {
-                    let a = self.stack.pop()?;
+                    let a = self.pop()?;
                     match a {
                         Value::Photon(a) => self.stack.push(Value::Photon(!a)),
                         _ => {
                             eprintln!("Runtime error: unsupported types for Not");
-                            return None;
+                            return Err(PrismError::Runtime(
+                                "Unsupported types for Not".to_string(),
+                            ));
                         }
                     }
                 }
                 Equal => {
-                    let b = self.stack.pop()?;
-                    let a = self.stack.pop()?;
+                    let b = self.pop()?;
+                    let a = self.pop()?;
                     self.stack.push(Value::Photon(a == b));
                 }
                 NotEqual => {
-                    let b = self.stack.pop()?;
-                    let a = self.stack.pop()?;
+                    let b = self.pop()?;
+                    let a = self.pop()?;
                     self.stack.push(Value::Photon(a != b));
+                }
+                Pop => {
+                    self.pop()?;
+                }
+                Print => {
+                    let value = self.pop()?;
+                    println!("{}", value);
+                }
+                Return => {
+                    return Ok(());
                 }
             }
 
-            self.debug_stack();
+            // self.debug_stack();
         }
 
-        None
+        Ok(())
     }
 }

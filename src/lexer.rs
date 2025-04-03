@@ -15,7 +15,7 @@ impl<'a> Lexer<'a> {
             chars,
             current: first,
             line: 1,
-            column: 0,
+            column: 1,
         }
     }
 
@@ -128,6 +128,7 @@ impl<'a> Lexer<'a> {
         }
 
         let kind = match ident.as_str() {
+            "emit" => TokenKind::Emit,
             "let" => TokenKind::Let,
             "const" => TokenKind::Const,
             "fn" => TokenKind::Fn,
@@ -146,8 +147,8 @@ impl<'a> Lexer<'a> {
             "Light" => TokenKind::Light,
             "Lumens" => TokenKind::Lumens,
             "Photon" => TokenKind::Photon,
-            "typedef" => TokenKind::Typedef,
-            "struct" => TokenKind::Struct,
+            "Refraction" => TokenKind::Refraction,
+            "facet" => TokenKind::Facet,
             "interface" => TokenKind::Interface,
             "import" => TokenKind::Import,
             "as" => TokenKind::As,

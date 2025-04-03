@@ -1,0 +1,2 @@
+emit 1 + 1; // test: <2>
+emit "Fiat " + "Lux"; // test: <"Fiat Lux">

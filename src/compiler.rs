@@ -22,6 +22,8 @@ pub enum Op {
     LessEqual,
     Greater,
     GreaterEqual,
+    Pop,
+    Print,
     Return,
 }
 
@@ -50,19 +52,23 @@ impl Compiler {
             constants: Vec::new(),
         };
 
-        println!("🔹 [ast] {:?}", self.ast);
-
         for stmt in &self.ast {
             match stmt {
                 Stmt::ExprStmt(expr) => {
                     Self::compile_expr(expr, &mut chunk);
-                    chunk.code.push(Op::Return);
+                    // chunk.code.push(Op::Pop);
+                }
+                Stmt::EmitStmt(expr) => {
+                    Self::compile_expr(expr, &mut chunk);
+                    chunk.code.push(Op::Print);
                 }
                 _ => {
                     // Ignore let/const for now
                 }
             }
         }
+
+        // chunk.code.push(Op::Return);
 
         chunk
     }
@@ -94,9 +100,21 @@ impl Compiler {
                 chunk.code.push(Op::Const(index));
             }
 
+            Expr::String(s) => {
+                let index = chunk.constants.len();
+                chunk.constants.push(Value::Lumens(s.clone()));
+                chunk.code.push(Op::Const(index));
+            }
+
             Expr::Number(n) => {
                 let index = chunk.constants.len();
                 chunk.constants.push(Value::Light(*n));
+                chunk.code.push(Op::Const(index));
+            }
+
+            Expr::Umbra => {
+                let index = chunk.constants.len();
+                chunk.constants.push(Value::Umbra);
                 chunk.code.push(Op::Const(index));
             }
 
@@ -107,9 +125,8 @@ impl Compiler {
                     crate::ast::UnaryOp::Minus => chunk.code.push(Op::Negate),
                 }
             }
-            _ => {
-                // REPL only supports number expressions for now
-            }
+
+            _ => {}
         }
     }
 }

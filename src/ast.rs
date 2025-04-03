@@ -42,6 +42,7 @@ pub enum Expr {
     Number(f64),
     String(String),
     Identifier(String),
+    Umbra,
     Bool(bool),
     Binary {
         left: Box<Expr>,
@@ -58,4 +59,5 @@ pub enum Expr {
 pub enum Stmt {
     LetDecl { name: String, ty: Type, value: Expr },
     ExprStmt(Expr),
+    EmitStmt(Expr),
 }

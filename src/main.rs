@@ -8,50 +8,31 @@ mod token;
 mod value;
 
 use compiler::Compiler;
-use prism::Prism;
-use std::io::{self, Write};
+use prism::{Prism, PrismError};
+use std::fs;
 
 fn main() {
-    repl();
-}
-
-fn repl() {
-    let debug_mode = true;
-    println!("Lux REPL — Post Tenebras Lux");
-
-    loop {
-        print!("◢ ");
-        io::stdout().flush().unwrap();
-
-        let mut line = String::new();
-        if io::stdin().read_line(&mut line).is_err() {
-            break;
-        }
-
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        // Try to compile source
-        let compiler = match Compiler::new(line.clone()) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Syntax error at {}:{} → {}", e.line, e.column, e.message);
-                continue; // ← don't crash! Let user try again
-            }
-        };
-
-        let chunk = compiler.compile();
-        let mut prism = Prism::new(chunk);
-        match prism.run() {
-            Some(val) => {
-                if debug_mode {
-                    println!("{:?}", val); // raw output
-                } else {
-                    println!("=> {}", val); // pretty
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        let filename = &args[1];
+        match fs::read_to_string(filename) {
+            Ok(source) => match Compiler::new(source) {
+                Ok(compiler) => {
+                    let chunk = compiler.compile();
+                    let mut prism = Prism::new(chunk);
+                    match prism.run() {
+                        Err(PrismError::Compile(msg)) => eprintln!("💥 Compile error: {msg}"),
+                        Err(PrismError::Runtime(msg)) => eprintln!("💥 Runtime error: {msg}"),
+                        _ => {}
+                    }
                 }
+                Err(err) => eprintln!("Parse error: {:#?}", err),
+            },
+            Err(err) => {
+                eprintln!("Could not read file '{filename}': {err}");
             }
-            None => eprintln!("Runtime error"),
         }
+    } else {
+        eprintln!("Usage: prism <filename>");
     }
 }

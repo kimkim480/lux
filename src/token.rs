@@ -33,6 +33,8 @@ pub enum TokenKind {
     Identifier(String),
     Number(f64),
     String(String),
+    True,
+    False,
 
     // Keywords
     Let,
@@ -47,17 +49,20 @@ pub enum TokenKind {
     Default,
     Break,
     Continue,
-    True,
-    False,
+    Refraction,
+    Facet,
+    Interface,
+    Import,
+    As,
+
+    // Native types
     Umbra,
     Light,
     Lumens,
     Photon,
-    Typedef,
-    Struct,
-    Interface,
-    Import,
-    As,
+
+    // Native functions
+    Emit,
 
     Error(String),
     EOF,
