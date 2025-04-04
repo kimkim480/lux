@@ -53,6 +53,10 @@ pub enum Expr {
         op: UnaryOp,
         expr: Box<Expr>,
     },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

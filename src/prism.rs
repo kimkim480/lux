@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::value::{Chunk, Op, Value};
+use crate::value::{CallFrame, Chunk, Op, Value};
 
 pub type PrismResult<T> = Result<T, PrismError>;
 
@@ -11,18 +11,16 @@ pub enum PrismError {
 }
 
 pub struct Prism {
-    ip: usize, // instruction pointer
-    chunk: Chunk,
+    pub frames: Vec<CallFrame>,
     pub stack: Vec<Value>,
     pub globals: HashMap<String, Value>,
 }
 
 impl Prism {
-    pub fn new(chunk: Chunk) -> Self {
+    pub fn new() -> Self {
         Prism {
-            ip: 0,
+            frames: Vec::new(),
             stack: Vec::new(),
-            chunk,
             globals: HashMap::new(),
         }
     }
@@ -76,20 +74,27 @@ impl Prism {
     }
 
     pub fn run(&mut self) -> PrismResult<()> {
-        // self.chunk.disassemble("global");
         use Op::*;
 
-        while self.ip < self.chunk.code.len() {
-            let op = &self.chunk.code[self.ip];
-            self.ip += 1;
+        loop {
+            let op = {
+                let frame = self.frames.last_mut().unwrap();
+                if frame.ip >= frame.function.chunk.code.len() {
+                    break;
+                }
+                let op = frame.function.chunk.code[frame.ip].clone();
+                frame.ip += 1;
+                op
+            };
 
             match op {
                 Constant(index) => {
-                    let value = self.chunk.constants[*index].clone();
+                    let frame = self.frames.last().unwrap();
+                    let value = frame.function.chunk.constants[index].clone();
                     self.stack.push(value);
                 }
                 Add | Sub | Mul | Div | Rem | Less | LessEqual | Greater | GreaterEqual => {
-                    self.binary_op(op.clone())?;
+                    self.binary_op(op)?;
                 }
                 Negate => {
                     let a = self.pop()?;
@@ -133,7 +138,7 @@ impl Prism {
                     println!("{}", value);
                 }
                 GetGlobal(name) => {
-                    let value = self.globals.get(name).cloned().ok_or_else(|| {
+                    let value = self.globals.get(&name).cloned().ok_or_else(|| {
                         PrismError::Runtime(format!("Undefined global constant '{}'", name))
                     })?;
                     self.stack.push(value);
@@ -146,19 +151,60 @@ impl Prism {
                         ))
                     })?;
 
-                    if self.globals.contains_key(name) {
+                    if self.globals.contains_key(&name) {
                         return Err(PrismError::Runtime(format!(
                             "Global constant '{}' already defined",
                             name
                         )));
                     }
 
-                    self.globals.insert(name.clone(), value);
+                    self.globals.insert(name, value);
                 }
-                Call(_) => {}
+                GetLocal(slot) => {
+                    let val = self.stack.get(slot).cloned().ok_or_else(|| {
+                        PrismError::Runtime(format!("undefined local variable '{}'", slot))
+                    })?;
+                    self.stack.push(val);
+                }
+                SetLocal(slot) => {
+                    let val = self.stack.pop().ok_or_else(|| {
+                        PrismError::Runtime(format!(
+                            "Value missing when assigning to local '{}'",
+                            slot
+                        ))
+                    })?;
+                    if self.stack.len() <= slot {
+                        self.stack.resize(slot + 1, Value::Umbra);
+                    }
+                    self.stack[slot] = val;
+                }
+                Call(_) => {
+                    let value = self
+                        .stack
+                        .pop()
+                        .ok_or_else(|| PrismError::Runtime("Expected function".to_string()))?;
+
+                    match value {
+                        Value::Function(func) => {
+                            let frame = CallFrame {
+                                function: func.clone(),
+                                ip: 0,
+                                offset: self.stack.len(),
+                            };
+                            self.frames.push(frame);
+                        }
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Tried to call a non-function".to_string(),
+                            ));
+                        }
+                    }
+                }
                 Return => {
-                    self.stack.pop();
-                    return Ok(());
+                    self.frames.pop();
+                    if self.frames.is_empty() {
+                        return Ok(()); // program ends
+                    }
                 }
             }
         }

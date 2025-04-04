@@ -11,6 +11,7 @@ mod value;
 use compiler::Compiler;
 use prism::{Prism, PrismError};
 use std::fs;
+use value::CallFrame;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -19,8 +20,16 @@ fn main() {
         match fs::read_to_string(filename) {
             Ok(source) => match Compiler::new(source) {
                 Ok(mut compiler) => {
-                    let chunk = compiler.compile();
-                    let mut prism = Prism::new(chunk);
+                    let _start = compiler.compile();
+                    let mut prism = Prism::new();
+                    prism.frames.push(CallFrame {
+                        function: _start,
+                        ip: 0,
+                        offset: 0,
+                    });
+
+                    prism.globals = compiler.globals;
+
                     match prism.run() {
                         Err(PrismError::Compile(msg)) => eprintln!("💥 Compile error: {msg}"),
                         Err(PrismError::Runtime(msg)) => eprintln!("💥 Runtime error: {msg}"),

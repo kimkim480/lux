@@ -4,10 +4,15 @@ const PI: Light = 3.1415;
 // const TWOPI: Light = PI * 2;
 
 emit PI; // test: <3.1415>
-// emit TWOPI; // test <6.283>
+// emit TWOPI;
 
 fn Prism() {
-  emit "Fiat Lux";
+  let x: Light = 1 + 1;
+  let motto: Lumens = "Fiat Lux";
 
-  emit PI;
+  emit motto; // test: <"Fiat Lux">
+
+  emit PI;  // test: <3.1415>
 }
+
+Prism();

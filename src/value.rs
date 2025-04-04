@@ -55,6 +55,8 @@ pub enum Op {
     Print,
     GetGlobal(String),
     SetGlobal(String),
+    GetLocal(usize),
+    SetLocal(usize),
     Call(String),
     Return,
 }
@@ -71,12 +73,19 @@ impl Chunk {
         for (i, op) in self.code.iter().enumerate() {
             print!("{:04} ", i);
             match op {
+                Op::Print => println!("{:<21} '{}'", "Print", ""),
                 Op::Constant(index) => {
                     let value = &self.constants[*index];
                     println!("{:<16} {:>4} '{}'", "Constant", index, value);
                 }
                 Op::GetGlobal(name) => println!("{:<21} '{}'", "GetGlobal", name),
                 Op::SetGlobal(name) => println!("{:<21} '{}'", "SetGlobal", name),
+                Op::GetLocal(slot) => {
+                    println!("{:<21} '{}' {}", "GetLocal", slot, self.constants[*slot])
+                }
+                Op::SetLocal(slot) => {
+                    println!("{:<18} '{}' {}", "SetLocal", slot, self.constants[*slot])
+                }
                 Op::Call(name) => println!("{:<21} '{}'", "Call", name),
                 other => println!("{:?}", other),
             }

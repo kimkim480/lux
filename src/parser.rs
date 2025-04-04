@@ -187,7 +187,27 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_infix_binary(&mut self, left: Expr) -> Result<Expr, ParseError> {
+    fn parse_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
+        let mut args = Vec::new();
+
+        if !self.match_token(&TokenKind::RightParen) {
+            loop {
+                let arg = self.parse_expr()?;
+                args.push(arg);
+                if !self.match_token(&TokenKind::Comma) {
+                    self.consume_token(TokenKind::RightParen, "Expected ')' after arguments")?;
+                    break;
+                }
+            }
+        }
+
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            args,
+        })
+    }
+
+    fn parse_binary(&mut self, left: Expr) -> Result<Expr, ParseError> {
         let op = self.previous.kind.clone();
         let precedence = self.get_rule(&op).precedence;
         let right = self.parse_precedence(precedence.next())?;
@@ -320,14 +340,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_let(&mut self) -> Result<Stmt, ParseError> {
-        let tok = self.advance();
+        self.advance(); // consume let
 
-        let name = match &tok.kind {
+        let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
             _ => {
                 return Err(ParseError::new(
                     "expected identifier in let declaration",
-                    &tok,
+                    &self.peek(),
                 ));
             }
         };
@@ -399,7 +419,7 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    fn parse_prefix_unary(&mut self) -> Result<Expr, ParseError> {
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
         let op = self.previous.kind.clone();
         let right = self.parse_precedence(Precedence::Unary)?;
         Ok(Expr::Unary {
@@ -457,38 +477,38 @@ impl<'a> Parser<'a> {
         use TokenKind::*;
         match kind {
             Bang => ParseRule {
-                prefix: Some(Parser::parse_prefix_unary),
+                prefix: Some(Parser::parse_unary),
                 infix: None,
                 precedence: Precedence::None,
             },
             EqualEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Equality,
             },
             BangEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Equality,
             },
             Greater => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Comparison,
             },
             GreaterEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Comparison,
             },
             Less => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Comparison,
             },
             LessEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Comparison,
             },
             Number(_) => ParseRule {
@@ -498,33 +518,33 @@ impl<'a> Parser<'a> {
             },
             Plus => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Term,
             },
             Star => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Factor,
             },
             Minus => ParseRule {
-                prefix: Some(Parser::parse_prefix_unary),
-                infix: Some(Parser::parse_infix_binary),
+                prefix: Some(Parser::parse_unary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Term,
             },
             Slash => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Factor,
             },
             Percent => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_infix_binary),
+                infix: Some(Parser::parse_binary),
                 precedence: Precedence::Factor,
             },
             LeftParen => ParseRule {
                 prefix: Some(Parser::parse_grouping),
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(Parser::parse_call),
+                precedence: Precedence::Call,
             },
             True => ParseRule {
                 prefix: Some(Parser::parse_literal),

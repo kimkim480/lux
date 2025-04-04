@@ -9,6 +9,8 @@ use crate::{
 };
 
 pub struct Compiler {
+    scopes: Vec<HashMap<String, usize>>,
+    next_slot: usize,
     pub ast: Vec<Stmt>,
     pub globals: HashMap<String, Value>,
 }
@@ -22,13 +24,21 @@ impl Compiler {
         // println!("🔹 [ast] {:?}", ast);
 
         Ok(Compiler {
+            scopes: vec![],
+            next_slot: 0,
             ast,
             globals: HashMap::new(),
         })
     }
 
-    pub fn compile(&mut self) -> Chunk {
-        self.compile_stmt(self.ast.clone())
+    pub fn compile(&mut self) -> Rc<Function> {
+        let chunk = self.compile_stmt(self.ast.clone());
+
+        Rc::new(Function {
+            name: "_start".to_string(),
+            arity: 0,
+            chunk,
+        })
     }
 
     fn compile_stmt(&mut self, stmts: Vec<Stmt>) -> Chunk {
@@ -39,16 +49,20 @@ impl Compiler {
 
         for stmt in stmts {
             match stmt {
+                Stmt::LetDecl { name, value, .. } => {
+                    Self::compile_expr(self, &value, &mut chunk);
+                    let slot = self.declare_local(&name);
+                    chunk.code.push(Op::SetLocal(slot));
+                }
                 Stmt::ConstDecl { name, value, .. } => {
-                    Self::compile_expr(&value, &mut chunk);
+                    Self::compile_expr(self, &value, &mut chunk);
                     chunk.code.push(Op::SetGlobal(name.clone()));
                 }
                 Stmt::ExprStmt(expr) => {
-                    Self::compile_expr(&expr, &mut chunk);
-                    // chunk.code.push(Op::Pop);
+                    Self::compile_expr(self, &expr, &mut chunk);
                 }
                 Stmt::EmitStmt(expr) => {
-                    Self::compile_expr(&expr, &mut chunk);
+                    Self::compile_expr(self, &expr, &mut chunk);
                     chunk.code.push(Op::Print);
                 }
                 Stmt::FnDecl {
@@ -58,6 +72,8 @@ impl Compiler {
                     body,
                     return_type,
                 } => {
+                    self.begin_scope();
+
                     let mut fn_chunk = self.compile_stmt(body);
                     fn_chunk.constants.push(Value::Umbra);
                     fn_chunk.code.push(Op::Return);
@@ -71,6 +87,8 @@ impl Compiler {
                     // Store in global as const
                     let value = Value::Function(Rc::new(func));
                     self.globals.insert(name.clone(), value);
+
+                    self.end_scope();
                 }
                 _ => {
                     // Ignore let/const for now
@@ -81,14 +99,18 @@ impl Compiler {
         chunk
     }
 
-    fn compile_expr(expr: &Expr, chunk: &mut Chunk) {
+    fn compile_expr(&mut self, expr: &Expr, chunk: &mut Chunk) {
         match expr {
             Expr::Identifier(name) => {
-                chunk.code.push(Op::GetGlobal(name.clone()));
+                if let Some(slot) = self.resolve_local(&name) {
+                    chunk.code.push(Op::GetLocal(slot));
+                } else {
+                    chunk.code.push(Op::GetGlobal(name.clone()));
+                }
             }
             Expr::Binary { left, op, right } => {
-                Self::compile_expr(left, chunk);
-                Self::compile_expr(right, chunk);
+                Self::compile_expr(self, left, chunk);
+                Self::compile_expr(self, right, chunk);
 
                 match op {
                     crate::ast::BinaryOp::Plus => chunk.code.push(Op::Add),
@@ -130,14 +152,53 @@ impl Compiler {
             }
 
             Expr::Unary { op, expr } => {
-                Self::compile_expr(expr, chunk);
+                Self::compile_expr(self, expr, chunk);
                 match op {
                     crate::ast::UnaryOp::Bang => chunk.code.push(Op::Not),
                     crate::ast::UnaryOp::Minus => chunk.code.push(Op::Negate),
                 }
             }
-
-            _ => {}
+            Expr::Call { callee, args } => {
+                Self::compile_expr(self, callee, chunk);
+                for arg in args {
+                    Self::compile_expr(self, arg, chunk);
+                }
+                let name = match &**callee {
+                    Expr::Identifier(name) => name.clone(),
+                    _ => panic!("Expected identifier"),
+                };
+                chunk.code.push(Op::Call(name));
+            }
         }
+    }
+
+    fn begin_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn end_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn declare_local(&mut self, name: &str) -> usize {
+        let index = self.next_slot;
+        self.next_slot += 1;
+
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .insert(name.to_string(), index);
+
+        index
+    }
+
+    fn resolve_local(&self, name: &str) -> Option<usize> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(&index) = scope.get(name) {
+                return Some(index);
+            }
+        }
+
+        None
     }
 }
