@@ -57,7 +57,24 @@ pub enum Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    LetDecl { name: String, ty: Type, value: Expr },
+    ConstDecl {
+        name: String,
+        ty: Type,
+        value: Expr,
+    },
+    FnDecl {
+        name: String,
+        params: Vec<(String, Type)>,
+        arity: usize,
+        body: Vec<Stmt>,
+        return_type: Type,
+    },
+    LetDecl {
+        name: String,
+        ty: Type,
+        value: Expr,
+    },
+    ConstellationDecl(String),
     ExprStmt(Expr),
     EmitStmt(Expr),
 }

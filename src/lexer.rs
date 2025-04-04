@@ -128,6 +128,7 @@ impl<'a> Lexer<'a> {
         }
 
         let kind = match ident.as_str() {
+            "constellation" => TokenKind::Constellation,
             "emit" => TokenKind::Emit,
             "let" => TokenKind::Let,
             "const" => TokenKind::Const,

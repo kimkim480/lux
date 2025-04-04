@@ -1,5 +1,6 @@
-use crate::compiler::{Chunk, Op};
-use crate::value::Value;
+use std::collections::HashMap;
+
+use crate::value::{Chunk, Op, Value};
 
 pub type PrismResult<T> = Result<T, PrismError>;
 
@@ -11,8 +12,9 @@ pub enum PrismError {
 
 pub struct Prism {
     ip: usize, // instruction pointer
-    stack: Vec<Value>,
     chunk: Chunk,
+    pub stack: Vec<Value>,
+    pub globals: HashMap<String, Value>,
 }
 
 impl Prism {
@@ -21,20 +23,8 @@ impl Prism {
             ip: 0,
             stack: Vec::new(),
             chunk,
+            globals: HashMap::new(),
         }
-    }
-
-    fn debug_stack(&self) {
-        if self.stack.is_empty() {
-            println!("🟦 [stack] <empty>");
-            return;
-        }
-
-        print!("🟦 [stack]");
-        for val in &self.stack {
-            print!(" | {}", val);
-        }
-        println!();
     }
 
     fn binary_op(&mut self, op: Op) -> Result<Value, PrismError> {
@@ -86,15 +76,15 @@ impl Prism {
     }
 
     pub fn run(&mut self) -> PrismResult<()> {
+        // self.chunk.disassemble("global");
         use Op::*;
 
         while self.ip < self.chunk.code.len() {
             let op = &self.chunk.code[self.ip];
             self.ip += 1;
-            // println!("🔹 [op] {:?}", op);
 
             match op {
-                Const(index) => {
+                Constant(index) => {
                     let value = self.chunk.constants[*index].clone();
                     self.stack.push(value);
                 }
@@ -142,12 +132,35 @@ impl Prism {
                     let value = self.pop()?;
                     println!("{}", value);
                 }
+                GetGlobal(name) => {
+                    let value = self.globals.get(name).cloned().ok_or_else(|| {
+                        PrismError::Runtime(format!("Undefined global constant '{}'", name))
+                    })?;
+                    self.stack.push(value);
+                }
+                SetGlobal(name) => {
+                    let value = self.stack.pop().ok_or_else(|| {
+                        PrismError::Runtime(format!(
+                            "Value missing when assigning to global constant '{}'",
+                            name
+                        ))
+                    })?;
+
+                    if self.globals.contains_key(name) {
+                        return Err(PrismError::Runtime(format!(
+                            "Global constant '{}' already defined",
+                            name
+                        )));
+                    }
+
+                    self.globals.insert(name.clone(), value);
+                }
+                Call(_) => {}
                 Return => {
+                    self.stack.pop();
                     return Ok(());
                 }
             }
-
-            // self.debug_stack();
         }
 
         Ok(())

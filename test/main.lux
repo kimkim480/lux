@@ -1,2 +1,13 @@
-emit 1 + 1; // test: <2>
-emit "Fiat " + "Lux"; // test: <"Fiat Lux">
+constellation main;
+
+const PI: Light = 3.1415;
+// const TWOPI: Light = PI * 2;
+
+emit PI; // test: <3.1415>
+// emit TWOPI; // test <6.283>
+
+fn Prism() {
+  emit "Fiat Lux";
+
+  emit PI;
+}

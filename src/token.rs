@@ -37,6 +37,7 @@ pub enum TokenKind {
     False,
 
     // Keywords
+    Constellation,
     Let,
     Const,
     Fn,

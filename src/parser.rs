@@ -1,4 +1,5 @@
 use crate::ast::{BinaryOp, Expr, Stmt, Type, UnaryOp};
+use crate::constants;
 use crate::error::ParseError;
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
@@ -164,7 +165,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_emit(&mut self) -> Result<Stmt, ParseError> {
-        self.consume_token(TokenKind::Emit, "Expected 'emit' keyword")?;
+        self.advance(); // consume emit
         let expr = self.parse_expr()?;
         self.consume_token(TokenKind::Semicolon, "Expected ';' after emit")?;
         Ok(Stmt::EmitStmt(expr))
@@ -203,6 +204,119 @@ impl<'a> Parser<'a> {
         } else {
             Err(ParseError::new("Expected number", &self.previous))
         }
+    }
+
+    fn parse_identifier(&mut self) -> Result<Expr, ParseError> {
+        if let TokenKind::Identifier(name) = self.previous.kind.clone() {
+            Ok(Expr::Identifier(name))
+        } else {
+            Err(ParseError::new("Expected identifier", &self.previous))
+        }
+    }
+
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
+        let mut stmts = Vec::new();
+        while !self.match_token(&TokenKind::RightBrace) {
+            let stmt = self.parse_statement()?;
+            stmts.push(stmt);
+        }
+        Ok(stmts)
+    }
+
+    fn parse_fn(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume `fn`
+
+        let name_token = self.advance(); // TODO: watch this
+        let name = match &name_token.kind {
+            TokenKind::Identifier(name) => name.clone(),
+            _ => return Err(ParseError::new("Expected function name", name_token)),
+        };
+
+        self.consume_token(TokenKind::LeftParen, "Expected '(' after function name")?;
+
+        let mut params = Vec::new();
+        if !self.match_token(&TokenKind::RightParen) {
+            loop {
+                let ident = match &self.advance().kind {
+                    TokenKind::Identifier(name) => name.clone(),
+                    _ => return Err(ParseError::new("Expected parameter name", &self.previous)),
+                };
+
+                self.consume_token(TokenKind::Colon, "Expected ':' after parameter name")?;
+
+                let ty = self
+                    .parse_type()
+                    .ok_or_else(|| ParseError::new("Expected type", self.peek()))?;
+
+                params.push((ident, ty));
+
+                if !self.match_token(&TokenKind::Comma) {
+                    self.consume_token(TokenKind::RightParen, "Expected ')' after parameters")?;
+                    break;
+                }
+            }
+        }
+
+        let arity = params.len();
+        if arity > constants::MAX_ARITY {
+            return Err(ParseError::new(
+                "Function arity exceeds maximum limit",
+                &self.peek(),
+            ));
+        }
+
+        let return_type = if self.match_token(&TokenKind::Arrow) {
+            self.parse_type()
+                .ok_or_else(|| ParseError::new("Expected return type", self.peek()))?
+        } else {
+            Type::Umbra
+        };
+
+        self.consume_token(TokenKind::LeftBrace, "Expect '{' before function body.")?;
+
+        let body = self.parse_block()?; // returns Vec<Stmt>
+
+        Ok(Stmt::FnDecl {
+            name,
+            params,
+            arity,
+            body,
+            return_type,
+        })
+    }
+
+    fn parse_const(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume const
+        let name = match &self.peek().kind {
+            TokenKind::Identifier(name) => name.clone(),
+            _ => {
+                return Err(ParseError::new(
+                    "expected identifier in const declaration",
+                    &self.peek(),
+                ));
+            }
+        };
+
+        self.advance(); // consume identifier
+        self.consume_token(
+            TokenKind::Colon,
+            "expected ':' after identifier in const declaration",
+        )?;
+
+        let ty = self
+            .parse_type()
+            .ok_or_else(|| ParseError::new("expected type after ':'", &self.peek()))?;
+
+        self.consume_token(
+            TokenKind::Equal,
+            "expected '=' in const declaration — variable must be initialized",
+        )?;
+
+        let value = self.parse_binary_expr()?;
+
+        self.consume_token(TokenKind::Semicolon, "expected ';' after const declaration")?;
+
+        Ok(Stmt::ConstDecl { name, ty, value })
     }
 
     fn parse_let(&mut self) -> Result<Stmt, ParseError> {
@@ -259,7 +373,7 @@ impl<'a> Parser<'a> {
 
     fn parse_precedence(&mut self, min_prec: Precedence) -> Result<Expr, ParseError> {
         let token = self.advance().clone();
-
+        // println!("🔹 [parse_precedence] {:?}", token);
         let prefix_rule = self
             .get_rule(&token.kind)
             .prefix
@@ -296,10 +410,30 @@ impl<'a> Parser<'a> {
 
     fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
         match self.peek().kind {
+            TokenKind::Constellation => self.parse_constellation(),
+            TokenKind::Const => self.parse_const(),
             TokenKind::Let => self.parse_let(),
+            TokenKind::Fn => self.parse_fn(),
             TokenKind::Emit => self.parse_emit(),
             _ => self.parse_expr_stmt(),
         }
+    }
+
+    fn parse_constellation(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume constellation
+        let name = match &self.peek().kind {
+            TokenKind::Identifier(name) => name.clone(),
+            _ => return Err(ParseError::new("Expected identifier", &self.peek())),
+        };
+
+        self.advance(); // consume identifier
+
+        self.consume_token(
+            TokenKind::Semicolon,
+            "Expected ';' after constellation declaration",
+        )?;
+
+        Ok(Stmt::ConstellationDecl(name))
     }
 
     fn parse_type(&mut self) -> Option<Type> {
@@ -409,6 +543,11 @@ impl<'a> Parser<'a> {
             },
             String(_) => ParseRule {
                 prefix: Some(Parser::parse_string),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            Identifier(_) => ParseRule {
+                prefix: Some(Parser::parse_identifier),
                 infix: None,
                 precedence: Precedence::None,
             },

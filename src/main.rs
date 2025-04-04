@@ -1,5 +1,6 @@
 mod ast;
 mod compiler;
+mod constants;
 mod error;
 mod lexer;
 mod parser;
@@ -17,7 +18,7 @@ fn main() {
         let filename = &args[1];
         match fs::read_to_string(filename) {
             Ok(source) => match Compiler::new(source) {
-                Ok(compiler) => {
+                Ok(mut compiler) => {
                     let chunk = compiler.compile();
                     let mut prism = Prism::new(chunk);
                     match prism.run() {
@@ -26,7 +27,7 @@ fn main() {
                         _ => {}
                     }
                 }
-                Err(err) => eprintln!("Parse error: {:#?}", err),
+                Err(err) => eprintln!("{}", err),
             },
             Err(err) => {
                 eprintln!("Could not read file '{filename}': {err}");
