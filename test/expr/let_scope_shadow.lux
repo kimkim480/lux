@@ -1,0 +1,11 @@
+constellation main;
+
+fn Prism() {
+  let a: Light = 1;
+  emit a; // test: <1>
+
+  let a: Light = a + 1;
+  emit a; // test: <2>
+}
+
+Prism();

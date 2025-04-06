@@ -14,7 +14,7 @@ bin="./target/debug/lux"
 for file in $(find test -name "*.lux"); do
     echo "🧪 Testing $file"
 
-    output=$($bin "$file" 2>&1 | sed 's/[[:space:]]*$//')
+    output=$($bin "$file" 2>/dev/null | sed 's/[[:space:]]*$//')
     readarray -t actual_lines <<< "$output"
 
     # Get expected values from lines like: // test: <Light(8.0)>

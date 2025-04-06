@@ -10,7 +10,7 @@ fn Prism() {
   let x: Light = 1 + 1;
   let motto: Lumens = "Fiat Lux";
 
-  emit motto; // test: <"Fiat Lux">
+  emit motto; // test: <Fiat Lux>
 
   emit PI;  // test: <3.1415>
 }

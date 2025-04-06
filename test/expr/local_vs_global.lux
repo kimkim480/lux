@@ -1,0 +1,12 @@
+constellation main;
+
+const msg: Lumens = "Global";
+
+fn Prism() {
+  emit msg; // test: <Global>
+
+  let msg: Lumens = "Local";
+  emit msg; // test: <Local>
+}
+
+Prism();

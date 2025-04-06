@@ -1,0 +1,23 @@
+constellation main;
+
+const PI: Light = 3.1415;
+
+emit PI; // test: <3.1415>
+
+fn greet() {
+  emit "Fiat Lux"; // test: <Fiat Lux>
+}
+
+fn Prism() {
+  greet();
+
+  let x: Light = 10;
+  emit x; // test: <10>
+
+  let x: Lumens = "shadow";
+  emit x; // test: <shadow>
+
+  emit PI; // test: <3.1415>
+}
+
+Prism();

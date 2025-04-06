@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::value::{CallFrame, Chunk, Op, Value};
+use crate::{
+    constants::{MAX_FRAMES, MAX_STACK},
+    value::{CallFrame, Chunk, Op, Value},
+};
 
 pub type PrismResult<T> = Result<T, PrismError>;
 
@@ -63,8 +66,16 @@ impl Prism {
             }
         };
 
-        self.stack.push(result.clone());
+        self.push(result.clone())?;
         Ok(result)
+    }
+
+    fn push(&mut self, value: Value) -> Result<(), PrismError> {
+        if self.stack.len() >= MAX_STACK {
+            return Err(PrismError::Runtime("Stack overflow".to_string()));
+        }
+        self.stack.push(value);
+        Ok(())
     }
 
     fn pop(&mut self) -> Result<Value, PrismError> {
@@ -91,7 +102,7 @@ impl Prism {
                 Constant(index) => {
                     let frame = self.frames.last().unwrap();
                     let value = frame.function.chunk.constants[index].clone();
-                    self.stack.push(value);
+                    self.push(value)?;
                 }
                 Add | Sub | Mul | Div | Rem | Less | LessEqual | Greater | GreaterEqual => {
                     self.binary_op(op)?;
@@ -99,7 +110,7 @@ impl Prism {
                 Negate => {
                     let a = self.pop()?;
                     match a {
-                        Value::Light(a) => self.stack.push(Value::Light(-a)),
+                        Value::Light(a) => self.push(Value::Light(-a))?,
                         _ => {
                             eprintln!("Runtime error: unsupported types for Negate");
                             return Err(PrismError::Runtime(
@@ -111,7 +122,7 @@ impl Prism {
                 Not => {
                     let a = self.pop()?;
                     match a {
-                        Value::Photon(a) => self.stack.push(Value::Photon(!a)),
+                        Value::Photon(a) => self.push(Value::Photon(!a))?,
                         _ => {
                             eprintln!("Runtime error: unsupported types for Not");
                             return Err(PrismError::Runtime(
@@ -123,12 +134,12 @@ impl Prism {
                 Equal => {
                     let b = self.pop()?;
                     let a = self.pop()?;
-                    self.stack.push(Value::Photon(a == b));
+                    self.push(Value::Photon(a == b))?;
                 }
                 NotEqual => {
                     let b = self.pop()?;
                     let a = self.pop()?;
-                    self.stack.push(Value::Photon(a != b));
+                    self.push(Value::Photon(a != b))?;
                 }
                 Pop => {
                     self.pop()?;
@@ -141,7 +152,7 @@ impl Prism {
                     let value = self.globals.get(&name).cloned().ok_or_else(|| {
                         PrismError::Runtime(format!("Undefined global constant '{}'", name))
                     })?;
-                    self.stack.push(value);
+                    self.push(value)?;
                 }
                 SetGlobal(name) => {
                     let value = self.stack.pop().ok_or_else(|| {
@@ -164,7 +175,7 @@ impl Prism {
                     let val = self.stack.get(slot).cloned().ok_or_else(|| {
                         PrismError::Runtime(format!("undefined local variable '{}'", slot))
                     })?;
-                    self.stack.push(val);
+                    self.push(val)?;
                 }
                 SetLocal(slot) => {
                     let val = self.stack.pop().ok_or_else(|| {
@@ -179,6 +190,12 @@ impl Prism {
                     self.stack[slot] = val;
                 }
                 Call(_) => {
+                    if self.frames.len() >= MAX_FRAMES {
+                        return Err(PrismError::Runtime(
+                            "Stack overflow: too many nested calls".to_string(),
+                        ));
+                    }
+
                     let value = self
                         .stack
                         .pop()
