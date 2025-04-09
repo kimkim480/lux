@@ -1,0 +1,20 @@
+constellation main;
+
+fn Prism() {
+  let x: Light = 10;
+  emit x; // test: <10>
+
+  x = 42;
+  emit x; // test: <42>
+
+  x = x + 8;
+  emit x; // test: <50>
+
+  x = (x * 2) - 10;
+  emit x; // test: <90>
+
+  let y: Light = 1;
+  y = y + x;
+  emit y; // test: <91>
+
+}

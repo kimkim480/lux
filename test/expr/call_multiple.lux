@@ -1,18 +1,22 @@
 constellation main;
 
 fn A() {
-  emit "A"; // test: <A>
+  emit "A"; 
 }
 
 fn B() {
-  emit "B"; // test: <B>
+  emit "B"; 
   A();
 }
 
 fn Prism() {
-  emit "Prism"; // test: <Prism>
+  emit "Prism";
   B();
   A(); 
 }
 
-Prism();
+// tests
+// test: <Prism>
+// test: <B>
+// test: <A>
+// test: <A>

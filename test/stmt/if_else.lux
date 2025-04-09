@@ -1,0 +1,33 @@
+constellation main;
+
+fn Prism() {
+  if true {
+    emit "true branch"; // test: <true branch>
+  }
+
+  if false {
+    emit "should not run";
+  } else {
+    emit "else branch"; // test: <else branch>
+  }
+
+  if false {
+    emit "nope";
+  } else if true {
+    emit "else-if branch"; // test: <else-if branch>
+  } else { 
+    emit "nope again";
+  }
+
+  if true {
+    emit "first"; // test: <first>
+  } else if true {
+    emit "second";
+  }
+
+  if false {
+    emit "never";
+  }
+
+  emit "done"; // test: <done>
+}

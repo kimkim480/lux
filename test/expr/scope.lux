@@ -19,5 +19,3 @@ fn Prism() {
 
   emit PI; // test: <3.1415>
 }
-
-Prism();

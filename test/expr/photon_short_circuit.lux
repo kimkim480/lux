@@ -1,0 +1,19 @@
+constellation main;
+
+fn fail() -> Photon {
+  emit "fail"; // should never be printed if short-circuiting works
+  return false;
+}
+
+
+fn Prism() {  
+  emit false && fail();
+  emit true || fail(); 
+  emit fail() || false;
+}
+
+// tests
+// test: <false>
+// test: <true>
+// test: <fail>
+// test: <false>

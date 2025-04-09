@@ -1,0 +1,14 @@
+constellation main;
+
+fn fib(n: Light) -> Light {
+  if n <= 1 {
+    return n;
+  } else {
+    return fib(n - 1) + fib(n - 2);
+  }
+}
+
+fn Prism() {
+  emit fib(5);  // test: <5>
+  emit fib(10); // test: <55>
+}

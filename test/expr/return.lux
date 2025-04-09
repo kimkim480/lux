@@ -1,0 +1,35 @@
+constellation main;
+
+fn no_return() -> Umbra {
+  emit "no return";         
+  // returns Umbra implicitly
+}
+
+fn return_light() -> Light {
+  return 42;
+}
+
+fn return_text() -> Lumens {
+  return "hello";
+}
+
+fn early_return() -> Photon {
+  emit "start";             
+  return true;
+  emit "should not print";  // not reached
+}
+
+fn Prism() -> Umbra {
+  emit no_return();         
+  emit return_light();      
+  emit return_text();       
+  emit early_return();      
+}
+
+// tests
+// test: <no return>
+// test: <Umbra>
+// test: <42>
+// test: <hello>
+// test: <start>
+// test: <true>

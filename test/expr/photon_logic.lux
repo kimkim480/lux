@@ -1,0 +1,14 @@
+constellation main;
+
+fn Prism() {
+  emit false && true;  // test: <false>
+  emit true && false;  // test: <false>
+  emit true && true;   // test: <true>
+  emit false || false; // test: <false>
+  emit true || false;  // test: <true>
+  emit false || true;  // test: <true>
+  emit true || true;   // test: <true>
+  emit !false;         // test: <true>
+  emit !true;          // test: <false>
+  emit !Umbra;         // test: <💥 Runtime error: Cannot apply '!' to non-Photon value>
+}

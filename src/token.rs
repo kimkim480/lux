@@ -15,6 +15,11 @@ pub enum TokenKind {
     RightBrace, // }
 
     // One or two character tokens
+    PlusEqual,    // +=
+    MinusEqual,   // -=
+    StarEqual,    // *=
+    SlashEqual,   // /=
+    PercentEqual, // %=
     Minus,        // -
     Arrow,        // ->
     Equal,        // =
@@ -66,7 +71,7 @@ pub enum TokenKind {
     Emit,
 
     Error(String),
-    EOF,
+    Eof,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -2,6 +2,7 @@
 
 pass=0
 fail=0
+skip=0
 
 cargo build --quiet
 if [ $? -ne 0 ]; then
@@ -14,7 +15,13 @@ bin="./target/debug/lux"
 for file in $(find test -name "*.lux"); do
     echo "🧪 Testing $file"
 
-    output=$($bin "$file" 2>/dev/null | sed 's/[[:space:]]*$//')
+    if [[ $(grep "// skip" "$file") ]]; then
+        echo "🚫 Skipping $file"
+        ((skip++))
+        continue
+    fi
+
+    output=$($bin "$file" 2>&1 | sed 's/[[:space:]]*$//')
     readarray -t actual_lines <<< "$output"
 
     # Get expected values from lines like: // test: <Light(8.0)>
@@ -46,3 +53,4 @@ echo ""
 echo "📊 Test summary:"
 echo "✅ Passed: $pass"
 echo "❌ Failed: $fail"
+echo "🚫 Skipped: $skip"

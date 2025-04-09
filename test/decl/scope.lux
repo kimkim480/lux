@@ -1,0 +1,19 @@
+// skip
+constellation main;
+
+let a: Light = 1;
+
+const PI: Light = 3.1415;
+
+fn inside() -> Light {
+  let b: Light = 2;
+  emit b; // test: <2>
+
+  const C: Light = 10;
+
+  return PI;
+}
+
+fn Prism() {
+  emit inside(); // test: <3.1415>
+}

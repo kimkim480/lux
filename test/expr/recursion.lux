@@ -1,13 +1,16 @@
+// skip
 constellation main;
 
 fn Prism() {
   emit "Prism"; // test: <Prism>
-
-  fn A() {
-    emit "local fn";
-  }
-
-  A();
+  let y: Umbra = closure();
+  y();
 }
 
-Prism();
+fn closure() {
+  let x: Light = 10;
+
+  fn increment() { return x; }
+
+  return increment;
+}

@@ -8,5 +8,3 @@ fn Prism() {
   let msg: Lumens = "Local";
   emit msg; // test: <Local>
 }
-
-Prism();

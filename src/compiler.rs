@@ -1,186 +1,455 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    ast::{Expr, Stmt},
-    error::ParseError,
+    ast::{BinaryOp, Expr, LogicalOp, Stmt},
+    error::{ParseError, PrismError, PrismResult},
     lexer::Lexer,
     parser::Parser,
     value::{Chunk, Function, Op, Value},
 };
 
+#[derive(Clone, Debug)]
 pub struct Compiler {
-    scopes: Vec<HashMap<String, usize>>,
-    next_slot: usize,
-    pub ast: Vec<Stmt>,
+    filename: String,
+    ast: Vec<Stmt>,
     pub globals: HashMap<String, Value>,
+    pub context: CompilerContext,
+    pub enclosing: Option<Rc<RefCell<Compiler>>>,
 }
 
 impl Compiler {
-    pub fn new(source: String) -> Result<Self, ParseError> {
-        let lexer = Lexer::new(&source);
-        let mut parser = Parser::new(lexer);
+    pub fn new(filename: &str, source: String) -> Result<Rc<RefCell<Self>>, ParseError> {
+        let lexer = Lexer::new(&source, filename);
+        let mut parser = Parser::new(filename, lexer);
         let ast = parser.parse()?;
 
-        // println!("🔹 [ast] {:?}", ast);
-
-        Ok(Compiler {
-            scopes: vec![],
-            next_slot: 0,
-            ast,
-            globals: HashMap::new(),
-        })
-    }
-
-    pub fn compile(&mut self) -> Rc<Function> {
-        let chunk = self.compile_stmt(self.ast.clone());
-
-        Rc::new(Function {
+        let _start = Rc::new(RefCell::new(Function {
             name: "_start".to_string(),
             arity: 0,
-            chunk,
-        })
-    }
+            chunk: Chunk {
+                code: Vec::new(),
+                constants: Vec::new(),
+            },
+            upvalue_count: 0,
+        }));
 
-    fn compile_stmt(&mut self, stmts: Vec<Stmt>) -> Chunk {
-        let mut chunk = Chunk {
-            code: Vec::new(),
-            constants: Vec::new(),
+        let context = CompilerContext {
+            function: _start,
+            upvalues: vec![],
+            scopes: vec![HashMap::new()],
+            is_global_scope: true,
+            next_slot: 0,
         };
 
-        for stmt in stmts {
-            match stmt {
-                Stmt::LetDecl { name, value, .. } => {
-                    Self::compile_expr(self, &value, &mut chunk);
-                    let slot = self.declare_local(&name);
-                    chunk.code.push(Op::SetLocal(slot));
-                }
-                Stmt::ConstDecl { name, value, .. } => {
-                    Self::compile_expr(self, &value, &mut chunk);
-                    chunk.code.push(Op::SetGlobal(name.clone()));
-                }
-                Stmt::ExprStmt(expr) => {
-                    Self::compile_expr(self, &expr, &mut chunk);
-                }
-                Stmt::EmitStmt(expr) => {
-                    Self::compile_expr(self, &expr, &mut chunk);
-                    chunk.code.push(Op::Print);
-                }
-                Stmt::FnDecl {
-                    name,
-                    params,
-                    arity,
-                    body,
-                    return_type,
-                } => {
-                    self.begin_scope();
-
-                    let mut fn_chunk = self.compile_stmt(body);
-                    fn_chunk.constants.push(Value::Umbra);
-                    fn_chunk.code.push(Op::Return);
-
-                    let func = Function {
-                        name: name.clone(),
-                        arity,
-                        chunk: fn_chunk,
-                    };
-
-                    // Store in global as const
-                    let value = Value::Function(Rc::new(func));
-                    self.globals.insert(name.clone(), value);
-
-                    self.end_scope();
-                }
-                _ => {
-                    // Ignore let/const for now
-                }
-            }
-        }
-
-        chunk
+        Ok(Rc::new(RefCell::new(Compiler {
+            filename: filename.to_string(),
+            ast,
+            globals: HashMap::new(),
+            context,
+            enclosing: None,
+        })))
     }
 
-    fn compile_expr(&mut self, expr: &Expr, chunk: &mut Chunk) {
-        match expr {
-            Expr::Identifier(name) => {
-                if let Some(slot) = self.resolve_local(&name) {
-                    chunk.code.push(Op::GetLocal(slot));
+    pub fn compile(&mut self) -> PrismResult<Rc<RefCell<Function>>> {
+        self.compile_stmts(&self.ast.clone())?;
+
+        // Look for Prism() in globals
+        if self.globals.contains_key("Prism") {
+            self.emit(Op::GetGlobal("Prism".to_string()));
+            self.emit(Op::Call(0));
+        } else {
+            return Err(PrismError::Compile("Prism() not found".to_string()));
+        }
+
+        // Return Umbra (implicitly)
+        let index = self.add_constant(Value::Umbra);
+        self.emit(Op::Constant(index));
+        self.emit(Op::Return);
+
+        Ok(self.context.function.clone())
+    }
+
+    fn compile_stmts(&mut self, stmts: &[Stmt]) -> Result<(), PrismError> {
+        for stmt in stmts {
+            self.compile_stmt(stmt)?;
+        }
+
+        Ok(())
+    }
+
+    fn compile_stmt(&mut self, stmt: &Stmt) -> Result<(), PrismError> {
+        match stmt {
+            Stmt::LetDecl { name, value, .. } => {
+                if self.context.is_global_scope {
+                    return Err(PrismError::Compile(
+                        " `let` is not allowed at global scope".to_string(),
+                    ));
+                }
+
+                Self::compile_expr(self, value)?;
+                let slot = self.context.declare_local(name);
+                self.emit(Op::SetLocal(slot));
+            }
+            Stmt::ConstDecl { name, value, .. } => {
+                if !self.context.is_global_scope {
+                    return Err(PrismError::Compile(
+                        " `const` is not allowed at local scope".to_string(),
+                    ));
+                }
+
+                Self::compile_expr(self, value)?;
+                self.emit(Op::SetGlobal(name.clone()));
+            }
+            Stmt::Expr(expr) => {
+                Self::compile_expr(self, expr)?;
+            }
+            Stmt::Emit(expr) => {
+                Self::compile_expr(self, expr)?;
+                self.emit(Op::Print);
+            }
+            Stmt::FnDecl {
+                name,
+                arity,
+                body,
+                params,
+                ..
+            } => {
+                let function = Rc::new(RefCell::new(Function {
+                    name: name.clone(),
+                    arity: *arity,
+                    chunk: Chunk {
+                        code: Vec::new(),
+                        constants: Vec::new(),
+                    },
+                    upvalue_count: 0,
+                }));
+
+                let parent = Rc::new(RefCell::new(self.clone()));
+
+                let nested = Rc::new(RefCell::new(Compiler {
+                    filename: self.filename.clone(),
+                    ast: body.clone(),
+                    globals: self.globals.clone(),
+                    context: CompilerContext {
+                        function: function.clone(),
+                        upvalues: vec![],
+                        scopes: vec![HashMap::new()],
+                        is_global_scope: false,
+                        next_slot: 0,
+                    },
+                    enclosing: Some(parent),
+                }));
+
+                for (param_name, _) in params.iter() {
+                    nested.borrow_mut().context.declare_local(param_name);
+                }
+
+                nested.borrow_mut().context.begin_scope();
+                nested.borrow_mut().compile_stmts(body)?;
+                nested.borrow_mut().context.end_scope();
+
+                let index = nested.borrow_mut().add_constant(Value::Umbra);
+                nested.borrow_mut().emit(Op::Constant(index));
+                nested.borrow_mut().emit(Op::Return);
+
+                let value = Value::Function(function.clone());
+
+                if self.context.is_global_scope {
+                    self.globals.insert(name.clone(), value.clone());
                 } else {
-                    chunk.code.push(Op::GetGlobal(name.clone()));
+                    let fn_index = self.add_constant(value.clone());
+
+                    let slot = self.context.declare_local(name);
+
+                    let upvalues: Vec<(bool, usize)> = nested
+                        .borrow()
+                        .context
+                        .upvalues
+                        .iter()
+                        .map(|u| (u.is_local, u.index))
+                        .collect();
+
+                    self.emit(Op::Closure { fn_index, upvalues });
+                    self.emit(Op::SetLocal(slot));
                 }
             }
-            Expr::Binary { left, op, right } => {
-                Self::compile_expr(self, left, chunk);
-                Self::compile_expr(self, right, chunk);
+            Stmt::If {
+                condition,
+                body,
+                else_body,
+            } => {
+                Self::compile_expr(self, condition)?;
 
-                match op {
-                    crate::ast::BinaryOp::Plus => chunk.code.push(Op::Add),
-                    crate::ast::BinaryOp::Minus => chunk.code.push(Op::Sub),
-                    crate::ast::BinaryOp::Star => chunk.code.push(Op::Mul),
-                    crate::ast::BinaryOp::Slash => chunk.code.push(Op::Div),
-                    crate::ast::BinaryOp::Percent => chunk.code.push(Op::Rem),
-                    crate::ast::BinaryOp::EqualEqual => chunk.code.push(Op::Equal),
-                    crate::ast::BinaryOp::BangEqual => chunk.code.push(Op::NotEqual),
-                    crate::ast::BinaryOp::Less => chunk.code.push(Op::Less),
-                    crate::ast::BinaryOp::LessEqual => chunk.code.push(Op::LessEqual),
-                    crate::ast::BinaryOp::Greater => chunk.code.push(Op::Greater),
-                    crate::ast::BinaryOp::GreaterEqual => chunk.code.push(Op::GreaterEqual),
+                let else_pos = self.context.function.borrow().chunk.code.len();
+                self.emit(Op::JumpIfFalse(usize::MAX));
+
+                self.emit(Op::Pop);
+
+                self.compile_stmts(body)?;
+
+                let jump_pos = self.context.function.borrow().chunk.code.len();
+                self.emit(Op::Jump(usize::MAX));
+
+                let else_start = self.context.function.borrow().chunk.code.len();
+                self.emit_at(Op::JumpIfFalse(else_start), else_pos);
+
+                self.emit(Op::Pop);
+
+                if let Some(else_body) = else_body {
+                    self.compile_stmts(else_body)?;
                 }
+
+                let after = self.context.function.borrow().chunk.code.len();
+                self.emit_at(Op::Jump(after), jump_pos);
+            }
+            Stmt::Return(expr_opt) => {
+                match expr_opt {
+                    Some(expr) => {
+                        Self::compile_expr(self, expr)?;
+                    }
+                    None => {
+                        let index = self.add_constant(Value::Umbra);
+                        self.emit(Op::Constant(index));
+                    }
+                }
+
+                self.emit(Op::Return);
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn compile_expr(&mut self, expr: &Expr) -> Result<(), PrismError> {
+        match expr {
+            Expr::Identifier(name) => match self.context.resolve_local(name) {
+                Some(slot) => self.emit(Op::GetLocal(slot)),
+                None => match self.resolve_upvalue(name) {
+                    Some(index) => self.emit(Op::GetUpvalue(index)),
+                    None => self.emit(Op::GetGlobal(name.clone())),
+                },
+            },
+
+            Expr::Binary { left, op, right } => {
+                Self::compile_expr(self, left)?;
+                Self::compile_expr(self, right)?;
+
+                self.emit(Self::map_binary_op(op.clone()));
             }
 
             Expr::Bool(b) => {
-                let index = chunk.constants.len();
-                chunk.constants.push(Value::Photon(*b));
-                chunk.code.push(Op::Constant(index));
+                let index = self.add_constant(Value::Photon(*b));
+                self.emit(Op::Constant(index));
             }
 
             Expr::String(s) => {
-                let index = chunk.constants.len();
-                chunk.constants.push(Value::Lumens(s.clone()));
-                chunk.code.push(Op::Constant(index));
+                let index = self.add_constant(Value::Lumens(s.clone()));
+                self.emit(Op::Constant(index));
             }
 
             Expr::Number(n) => {
-                let index = chunk.constants.len();
-                chunk.constants.push(Value::Light(*n));
-                chunk.code.push(Op::Constant(index));
+                let index = self.add_constant(Value::Light(*n));
+                self.emit(Op::Constant(index));
             }
 
             Expr::Umbra => {
-                let index = chunk.constants.len();
-                chunk.constants.push(Value::Umbra);
-                chunk.code.push(Op::Constant(index));
+                let index = self.add_constant(Value::Umbra);
+                self.emit(Op::Constant(index));
             }
 
             Expr::Unary { op, expr } => {
-                Self::compile_expr(self, expr, chunk);
+                Self::compile_expr(self, expr)?;
                 match op {
-                    crate::ast::UnaryOp::Bang => chunk.code.push(Op::Not),
-                    crate::ast::UnaryOp::Minus => chunk.code.push(Op::Negate),
+                    crate::ast::UnaryOp::Bang => self.emit(Op::Not),
+                    crate::ast::UnaryOp::Minus => self.emit(Op::Negate),
                 }
             }
+
+            Expr::Assign { name, value } => {
+                if let Expr::Assign { .. } = **value {
+                    return Err(PrismError::Compile(
+                        "Chained assignment is not allowed".to_string(),
+                    ));
+                }
+
+                Self::compile_expr(self, value)?;
+
+                match self.context.resolve_local(name) {
+                    Some(slot) => {
+                        self.emit(Op::SetLocal(slot));
+                        self.emit(Op::GetLocal(slot));
+                    }
+                    None => match self.resolve_upvalue(name) {
+                        Some(index) => {
+                            self.emit(Op::SetUpvalue(index));
+                            self.emit(Op::GetUpvalue(index));
+                        }
+                        None => self.emit(Op::SetGlobal(name.clone())),
+                    },
+                }
+            }
+
+            Expr::AssignOp { name, op, value } => match self.context.resolve_local(name) {
+                Some(slot) => {
+                    self.emit(Op::GetLocal(slot));
+                    Self::compile_expr(self, value)?;
+                    self.emit(Self::map_binary_op(op.clone()));
+                    self.emit(Op::SetLocal(slot));
+                    self.emit(Op::GetLocal(slot));
+                }
+                None => match self.resolve_upvalue(name) {
+                    Some(index) => {
+                        self.emit(Op::GetUpvalue(index));
+                        Self::compile_expr(self, value)?;
+                        self.emit(Self::map_binary_op(op.clone()));
+                        self.emit(Op::SetUpvalue(index));
+                        self.emit(Op::GetUpvalue(index));
+                    }
+                    None => {
+                        return Err(PrismError::Compile(format!(
+                            "Undefined variable '{}'",
+                            name
+                        )));
+                    }
+                },
+            },
+
+            Expr::Logical { left, op, right } => {
+                Self::compile_expr(self, left)?;
+
+                match op {
+                    LogicalOp::OrOr => {
+                        let jump_pos = self.context.function.borrow().chunk.code.len();
+                        self.emit(Op::JumpIfFalse(usize::MAX));
+                        self.emit(Op::Jump(usize::MAX));
+
+                        // Patch the jump if false
+                        let after = self.context.function.borrow().chunk.code.len();
+                        self.emit_at(Op::JumpIfFalse(after), jump_pos);
+
+                        self.emit(Op::Pop);
+                        Self::compile_expr(self, right)?;
+
+                        let after = self.context.function.borrow().chunk.code.len();
+                        self.emit_at(Op::Jump(after), jump_pos + 1);
+                    }
+                    LogicalOp::AndAnd => {
+                        let jump_pos = self.context.function.borrow().chunk.code.len();
+                        self.emit(Op::JumpIfFalse(usize::MAX));
+
+                        self.emit(Op::Pop);
+                        Self::compile_expr(self, right)?;
+
+                        // Patch the jump if false
+                        let after = self.context.function.borrow().chunk.code.len();
+                        self.emit_at(Op::JumpIfFalse(after), jump_pos);
+                    }
+                }
+            }
+
             Expr::Call { callee, args } => {
-                Self::compile_expr(self, callee, chunk);
                 for arg in args {
-                    Self::compile_expr(self, arg, chunk);
+                    Self::compile_expr(self, arg)?;
                 }
-                let name = match &**callee {
-                    Expr::Identifier(name) => name.clone(),
-                    _ => panic!("Expected identifier"),
-                };
-                chunk.code.push(Op::Call(name));
+
+                Self::compile_expr(self, callee)?;
+                self.emit(Op::Call(args.len()));
+
+                if let Expr::Identifier(name) = &**callee {
+                    if let Some(Value::Function(func)) = self.globals.get(name) {
+                        if func.borrow().arity != args.len() {
+                            return Err(PrismError::Compile(format!(
+                                "Function '{}' expects {} arguments, but got {}",
+                                name,
+                                func.borrow().arity,
+                                args.len()
+                            )));
+                        }
+                    }
+                }
             }
+        }
+
+        Ok(())
+    }
+
+    fn map_binary_op(op: BinaryOp) -> Op {
+        match op {
+            BinaryOp::Plus => Op::Add,
+            BinaryOp::Minus => Op::Sub,
+            BinaryOp::Star => Op::Mul,
+            BinaryOp::Slash => Op::Div,
+            BinaryOp::Percent => Op::Rem,
+            BinaryOp::EqualEqual => Op::Equal,
+            BinaryOp::BangEqual => Op::NotEqual,
+            BinaryOp::Less => Op::Less,
+            BinaryOp::LessEqual => Op::LessEqual,
+            BinaryOp::Greater => Op::Greater,
+            BinaryOp::GreaterEqual => Op::GreaterEqual,
         }
     }
 
-    fn begin_scope(&mut self) {
+    pub fn resolve_upvalue(&mut self, name: &str) -> Option<usize> {
+        if let Some(enclosing_rc) = &self.enclosing {
+            let mut enclosing = enclosing_rc.borrow_mut();
+
+            if let Some(local_index) = enclosing.context.resolve_local(name) {
+                return Some(self.context.add_upvalue(true, local_index));
+            }
+
+            if let Some(up_index) = enclosing.resolve_upvalue(name) {
+                return Some(self.context.add_upvalue(false, up_index));
+            }
+        }
+
+        None
+    }
+
+    fn emit(&mut self, op: Op) {
+        self.context.function.borrow_mut().chunk.code.push(op);
+    }
+
+    fn emit_at(&mut self, op: Op, index: usize) {
+        self.context.function.borrow_mut().chunk.code[index] = op;
+    }
+
+    fn add_constant(&mut self, value: Value) -> usize {
+        self.context
+            .function
+            .borrow_mut()
+            .chunk
+            .constants
+            .push(value);
+        self.context.function.borrow_mut().chunk.constants.len() - 1
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct UpvalueInfo {
+    is_local: bool,
+    index: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct CompilerContext {
+    pub function: Rc<RefCell<Function>>,
+    upvalues: Vec<UpvalueInfo>,
+    scopes: Vec<HashMap<String, usize>>,
+    is_global_scope: bool,
+    next_slot: usize,
+}
+
+impl CompilerContext {
+    pub fn begin_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
 
-    fn end_scope(&mut self) {
+    pub fn end_scope(&mut self) {
         self.scopes.pop();
     }
 
-    fn declare_local(&mut self, name: &str) -> usize {
+    pub fn declare_local(&mut self, name: &str) -> usize {
         let index = self.next_slot;
         self.next_slot += 1;
 
@@ -192,13 +461,24 @@ impl Compiler {
         index
     }
 
-    fn resolve_local(&self, name: &str) -> Option<usize> {
+    pub fn resolve_local(&self, name: &str) -> Option<usize> {
         for scope in self.scopes.iter().rev() {
             if let Some(&index) = scope.get(name) {
                 return Some(index);
             }
         }
-
         None
+    }
+
+    pub fn add_upvalue(&mut self, is_local: bool, index: usize) -> usize {
+        let up = UpvalueInfo { is_local, index };
+
+        if let Some(i) = self.upvalues.iter().position(|u| *u == up) {
+            return i;
+        }
+
+        self.upvalues.push(up);
+        self.function.borrow_mut().upvalue_count += 1;
+        self.upvalues.len() - 1
     }
 }

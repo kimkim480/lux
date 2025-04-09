@@ -1,22 +1,16 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     constants::{MAX_FRAMES, MAX_STACK},
-    value::{CallFrame, Chunk, Op, Value},
+    error::{PrismError, PrismResult},
+    value::{CallFrame, Closure, Op, Upvalue, Value},
 };
-
-pub type PrismResult<T> = Result<T, PrismError>;
-
-#[derive(Debug)]
-pub enum PrismError {
-    Compile(String),
-    Runtime(String),
-}
 
 pub struct Prism {
     pub frames: Vec<CallFrame>,
     pub stack: Vec<Value>,
     pub globals: HashMap<String, Value>,
+    pub debug_trace: bool,
 }
 
 impl Prism {
@@ -25,12 +19,17 @@ impl Prism {
             frames: Vec::new(),
             stack: Vec::new(),
             globals: HashMap::new(),
+            debug_trace: false,
         }
     }
 
     fn binary_op(&mut self, op: Op) -> Result<Value, PrismError> {
         let b = self.pop()?;
         let a = self.pop()?;
+
+        if self.debug_trace {
+            // println!("a: {:?}\nb: {:?}", a, b);
+        }
 
         let result = match (a, b) {
             (Value::Light(a), Value::Light(b)) => match op {
@@ -84,30 +83,70 @@ impl Prism {
             .ok_or_else(|| PrismError::Runtime("Stack underflow".into()))
     }
 
-    pub fn run(&mut self) -> PrismResult<()> {
-        use Op::*;
+    pub fn capture_upvalue(&mut self, stack_index: usize) -> Rc<RefCell<Upvalue>> {
+        // TODO: later, reuse same upvalue if already open
+        Rc::new(RefCell::new(Upvalue::Open(stack_index)))
+    }
 
-        loop {
-            let op = {
-                let frame = self.frames.last_mut().unwrap();
-                if frame.ip >= frame.function.chunk.code.len() {
-                    break;
+    pub fn close_upvalues(&mut self, from_index: usize) {
+        for frame in &mut self.frames {
+            for up in &mut frame.upvalues {
+                let mut u = up.borrow_mut();
+                if let Upvalue::Open(i) = *u {
+                    if i >= from_index {
+                        let value = self.stack[i].clone();
+                        *u = Upvalue::Closed(value);
+                    }
                 }
-                let op = frame.function.chunk.code[frame.ip].clone();
+            }
+        }
+    }
+
+    pub fn run(&mut self) -> PrismResult<()> {
+        loop {
+            // if self.debug_trace {
+            //     self.print_stack_trace();
+            // }
+
+            let frame = self.frames.last_mut().unwrap();
+            if frame.ip >= frame.function.borrow().chunk.code.len() {
+                break;
+            }
+
+            if self.debug_trace {
+                frame
+                    .function
+                    .borrow()
+                    .chunk
+                    .trace_op(&format!("[{}]", frame.function.borrow().name), frame.ip);
+
+                // println!("stack: {:?}", self.stack);
+            }
+
+            let op = {
+                let op = frame.function.borrow().chunk.code[frame.ip].clone();
                 frame.ip += 1;
                 op
             };
 
             match op {
-                Constant(index) => {
+                Op::Constant(index) => {
                     let frame = self.frames.last().unwrap();
-                    let value = frame.function.chunk.constants[index].clone();
+                    let value = frame.function.borrow().chunk.constants[index].clone();
                     self.push(value)?;
                 }
-                Add | Sub | Mul | Div | Rem | Less | LessEqual | Greater | GreaterEqual => {
+                Op::Add
+                | Op::Sub
+                | Op::Mul
+                | Op::Div
+                | Op::Rem
+                | Op::Less
+                | Op::LessEqual
+                | Op::Greater
+                | Op::GreaterEqual => {
                     self.binary_op(op)?;
                 }
-                Negate => {
+                Op::Negate => {
                     let a = self.pop()?;
                     match a {
                         Value::Light(a) => self.push(Value::Light(-a))?,
@@ -119,42 +158,41 @@ impl Prism {
                         }
                     }
                 }
-                Not => {
+                Op::Not => {
                     let a = self.pop()?;
                     match a {
                         Value::Photon(a) => self.push(Value::Photon(!a))?,
                         _ => {
-                            eprintln!("Runtime error: unsupported types for Not");
                             return Err(PrismError::Runtime(
-                                "Unsupported types for Not".to_string(),
+                                "Cannot apply '!' to non-Photon value".to_string(),
                             ));
                         }
                     }
                 }
-                Equal => {
+                Op::Equal => {
                     let b = self.pop()?;
                     let a = self.pop()?;
                     self.push(Value::Photon(a == b))?;
                 }
-                NotEqual => {
+                Op::NotEqual => {
                     let b = self.pop()?;
                     let a = self.pop()?;
                     self.push(Value::Photon(a != b))?;
                 }
-                Pop => {
+                Op::Pop => {
                     self.pop()?;
                 }
-                Print => {
+                Op::Print => {
                     let value = self.pop()?;
                     println!("{}", value);
                 }
-                GetGlobal(name) => {
+                Op::GetGlobal(name) => {
                     let value = self.globals.get(&name).cloned().ok_or_else(|| {
                         PrismError::Runtime(format!("Undefined global constant '{}'", name))
                     })?;
                     self.push(value)?;
                 }
-                SetGlobal(name) => {
+                Op::SetGlobal(name) => {
                     let value = self.stack.pop().ok_or_else(|| {
                         PrismError::Runtime(format!(
                             "Value missing when assigning to global constant '{}'",
@@ -171,61 +209,183 @@ impl Prism {
 
                     self.globals.insert(name, value);
                 }
-                GetLocal(slot) => {
-                    let val = self.stack.get(slot).cloned().ok_or_else(|| {
-                        PrismError::Runtime(format!("undefined local variable '{}'", slot))
-                    })?;
-                    self.push(val)?;
+                Op::GetLocal(slot) => {
+                    let index = frame.offset + slot;
+                    let value = self.stack[index].clone();
+
+                    self.push(value)?;
                 }
-                SetLocal(slot) => {
+                Op::SetLocal(slot) => {
                     let val = self.stack.pop().ok_or_else(|| {
                         PrismError::Runtime(format!(
                             "Value missing when assigning to local '{}'",
                             slot
                         ))
                     })?;
-                    if self.stack.len() <= slot {
-                        self.stack.resize(slot + 1, Value::Umbra);
+
+                    let index = frame.offset + slot;
+
+                    if self.stack.len() <= index {
+                        self.stack.resize(index + 1, Value::Umbra);
                     }
-                    self.stack[slot] = val;
+
+                    self.stack[index] = val;
                 }
-                Call(_) => {
+                Op::GetUpvalue(index) => {
+                    let frame = self.frames.last().unwrap();
+
+                    let value = frame.upvalues[index].borrow().clone();
+                    match value {
+                        Upvalue::Open(stack_index) => {
+                            let val = self.stack[stack_index].clone();
+                            self.push(val)?;
+                        }
+                        Upvalue::Closed(val) => {
+                            self.push(val)?;
+                        }
+                    }
+                }
+                Op::SetUpvalue(index) => {
+                    let val = self.pop()?;
+                    let frame = self.frames.last().unwrap();
+                    let mut upval = frame.upvalues[index].borrow_mut();
+                    match *upval {
+                        Upvalue::Open(stack_index) => {
+                            self.stack[stack_index] = val.clone();
+                        }
+                        Upvalue::Closed(_) => {
+                            *upval = Upvalue::Closed(val.clone());
+                        }
+                    }
+                }
+                Op::Closure { fn_index, upvalues } => {
+                    let value = frame.function.borrow().chunk.constants[fn_index].clone();
+                    let Value::Function(function) = value else {
+                        return Err(PrismError::Runtime(format!(
+                            "Expected function at constant {}, found {:?}",
+                            fn_index, value
+                        )));
+                    };
+
+                    let mut captured = Vec::new();
+                    let offset = frame.offset;
+                    for (is_local, index) in upvalues {
+                        let upvalue = if is_local {
+                            self.capture_upvalue(offset + index)
+                        } else {
+                            self.frames.last().unwrap().upvalues[index].clone()
+                        };
+
+                        captured.push(upvalue);
+                    }
+
+                    let closure = Closure {
+                        function,
+                        upvalues: captured,
+                    };
+                    self.push(Value::Closure(Rc::new(closure)))?;
+                }
+                Op::Call(arity) => {
                     if self.frames.len() >= MAX_FRAMES {
                         return Err(PrismError::Runtime(
-                            "Stack overflow: too many nested calls".to_string(),
+                            "Stack overflow: too many nested calls.".to_string(),
                         ));
                     }
 
-                    let value = self
-                        .stack
-                        .pop()
-                        .ok_or_else(|| PrismError::Runtime("Expected function".to_string()))?;
+                    if self.stack.len() < arity + 1 {
+                        return Err(PrismError::Runtime(format!(
+                            "Not enough values on the stack for function call: need {} args + callee, got {}",
+                            arity,
+                            self.stack.len()
+                        )));
+                    }
 
-                    match value {
-                        Value::Function(func) => {
-                            let frame = CallFrame {
-                                function: func.clone(),
-                                ip: 0,
-                                offset: self.stack.len(),
-                            };
-                            self.frames.push(frame);
-                        }
+                    let callee_index = self.stack.len() - 1;
+                    let offset = self.stack.len() - arity - 1;
+                    let callee = self.stack[callee_index].clone();
+
+                    let closure = match callee {
+                        Value::Closure(c) => c,
+                        Value::Function(f) => Rc::new(Closure {
+                            function: f.clone(),
+                            upvalues: vec![],
+                        }),
                         _ => {
                             return Err(PrismError::Runtime(
-                                "Tried to call a non-function".to_string(),
+                                "Tried to call a non-function.".to_string(),
+                            ));
+                        }
+                    };
+
+                    let frame = CallFrame {
+                        function: closure.function.clone(),
+                        ip: 0,
+                        offset, // args are below callee
+                        upvalues: closure.upvalues.clone(),
+                    };
+
+                    self.frames.push(frame);
+                }
+                Op::JumpIfFalse(offset) => {
+                    let value = self.stack.last().unwrap();
+                    match value {
+                        Value::Photon(false) => frame.ip = offset,
+                        Value::Photon(true) => {}
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Logical operation requires Photon value".to_string(),
                             ));
                         }
                     }
                 }
-                Return => {
-                    self.frames.pop();
+                Op::Jump(offset) => {
+                    frame.ip = offset;
+                }
+
+                Op::Return => {
+                    let return_value = self.pop()?; // 1. get return value
+                    let frame = self.frames.pop().unwrap(); // 2. pop frame
+                    self.close_upvalues(frame.offset); // 3. close captured vars
+
+                    // 4. remove locals from stack
+                    self.stack.truncate(frame.offset);
+
+                    // 5. push return value for caller
+                    self.push(return_value)?;
+
+                    // 6. if no more frames, we’re done
                     if self.frames.is_empty() {
-                        return Ok(()); // program ends
+                        return Ok(());
                     }
                 }
             }
         }
 
         Ok(())
+    }
+
+    pub fn print_stack_trace(&self) {
+        println!("\n🌌 Prism Stack Trace 🌌");
+        println!("Stack (top ⬆):");
+
+        for (i, val) in self.stack.iter().enumerate().rev() {
+            println!("  [{:02}] {:?}", i, val);
+        }
+
+        println!("\nFrames:");
+        for (i, frame) in self.frames.iter().enumerate() {
+            let name = &frame.function.borrow().name;
+            println!(
+                "  [{}] fn {} @ ip={} offset={} (locals in stack[{}..{}])",
+                i,
+                name,
+                frame.ip,
+                frame.offset,
+                frame.offset,
+                frame.offset + frame.function.borrow().arity
+            );
+        }
+
+        println!("🔹 Total stack size: {}\n", self.stack.len());
     }
 }

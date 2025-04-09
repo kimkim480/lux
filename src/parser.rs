@@ -1,36 +1,8 @@
-use crate::ast::{BinaryOp, Expr, Stmt, Type, UnaryOp};
+use crate::ast::{BinaryOp, Expr, LogicalOp, Precedence, Stmt, Type, UnaryOp};
 use crate::constants;
 use crate::error::ParseError;
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
-
-#[derive(Debug, PartialEq, PartialOrd)]
-enum Precedence {
-    None,
-    Assignment, // =
-    Equality,   // ==, !=
-    Comparison, // <, >, <=, >=
-    Term,       // + -
-    Factor,     // * / %
-    Unary,      // ! -
-    Call,       // function calls
-}
-
-impl Precedence {
-    fn next(self) -> Precedence {
-        use Precedence::*;
-        match self {
-            None => Assignment,
-            Assignment => Equality,
-            Equality => Comparison,
-            Comparison => Term,
-            Term => Factor,
-            Factor => Unary,
-            Unary => Call,
-            Call => Call, // or Highest
-        }
-    }
-}
 
 type PrefixParseFn<'a> = fn(&mut Parser<'a>) -> Result<Expr, ParseError>;
 type InfixParseFn<'a> = fn(&mut Parser<'a>, Expr) -> Result<Expr, ParseError>;
@@ -42,16 +14,18 @@ struct ParseRule<'a> {
 }
 
 pub struct Parser<'a> {
+    filename: String,
     previous: Token,
     current: Token,
     lexer: Lexer<'a>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(mut lexer: Lexer<'a>) -> Self {
+    pub fn new(filename: &str, mut lexer: Lexer<'a>) -> Self {
         let first = lexer.next_token();
 
         Parser {
+            filename: filename.to_string(),
             lexer,
             previous: first.clone(),
             current: first.clone(),
@@ -87,7 +61,7 @@ impl<'a> Parser<'a> {
         if self.match_token(&expected) {
             Ok(())
         } else {
-            Err(ParseError::new(message, self.peek()))
+            Err(ParseError::new(message, &self.filename, self.peek()))
         }
     }
 
@@ -133,7 +107,7 @@ impl<'a> Parser<'a> {
             TokenKind::LessEqual => BinaryOp::LessEqual,
             TokenKind::Greater => BinaryOp::Greater,
             TokenKind::GreaterEqual => BinaryOp::GreaterEqual,
-            _ => panic!("Invalid binary operator: {:?}", op),
+            _ => panic!("Invalid binary operator: {:?}", op), // TODO: handle error
         }
     }
 
@@ -141,12 +115,12 @@ impl<'a> Parser<'a> {
         match op {
             TokenKind::Bang => UnaryOp::Bang,
             TokenKind::Minus => UnaryOp::Minus,
-            _ => panic!("Invalid unary operator: {:?}", op),
+            _ => panic!("Invalid unary operator: {:?}", op), // TODO: handle error
         }
     }
 
     fn is_at_end(&self) -> bool {
-        matches!(self.peek().kind, TokenKind::EOF)
+        matches!(self.peek().kind, TokenKind::Eof)
     }
 
     fn parse_binary_expr(&mut self) -> Result<Expr, ParseError> {
@@ -168,7 +142,7 @@ impl<'a> Parser<'a> {
         self.advance(); // consume emit
         let expr = self.parse_expr()?;
         self.consume_token(TokenKind::Semicolon, "Expected ';' after emit")?;
-        Ok(Stmt::EmitStmt(expr))
+        Ok(Stmt::Emit(expr))
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -178,7 +152,7 @@ impl<'a> Parser<'a> {
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expr()?;
         self.consume_token(TokenKind::Semicolon, "Expected ';' after expression")?;
-        Ok(Stmt::ExprStmt(expr))
+        Ok(Stmt::Expr(expr))
     }
 
     fn parse_grouping(&mut self) -> Result<Expr, ParseError> {
@@ -218,11 +192,44 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_arithmetic_assignment(&mut self, left: Expr) -> Result<Expr, ParseError> {
+        let op = self.previous.kind.clone();
+        let value = self.parse_precedence(Precedence::Assignment)?;
+
+        match left {
+            Expr::Identifier(name) => {
+                let op = match op {
+                    TokenKind::PlusEqual => BinaryOp::Plus,
+                    TokenKind::MinusEqual => BinaryOp::Minus,
+                    TokenKind::StarEqual => BinaryOp::Star,
+                    TokenKind::SlashEqual => BinaryOp::Slash,
+                    TokenKind::PercentEqual => BinaryOp::Percent,
+                    _ => unreachable!(),
+                };
+
+                Ok(Expr::AssignOp {
+                    name,
+                    op,
+                    value: Box::new(value),
+                })
+            }
+            _ => Err(ParseError::new(
+                "Invalid assignment target",
+                &self.filename,
+                &self.previous,
+            )),
+        }
+    }
+
     fn parse_number(&mut self) -> Result<Expr, ParseError> {
         if let TokenKind::Number(n) = self.previous.kind {
             Ok(Expr::Number(n))
         } else {
-            Err(ParseError::new("Expected number", &self.previous))
+            Err(ParseError::new(
+                "Expected number",
+                &self.filename,
+                self.peek(),
+            ))
         }
     }
 
@@ -230,7 +237,27 @@ impl<'a> Parser<'a> {
         if let TokenKind::Identifier(name) = self.previous.kind.clone() {
             Ok(Expr::Identifier(name))
         } else {
-            Err(ParseError::new("Expected identifier", &self.previous))
+            Err(ParseError::new(
+                "Expected identifier",
+                &self.filename,
+                self.peek(),
+            ))
+        }
+    }
+
+    fn parse_assignment(&mut self, left: Expr) -> Result<Expr, ParseError> {
+        let value = self.parse_precedence(Precedence::Assignment)?;
+
+        match left {
+            Expr::Identifier(name) => Ok(Expr::Assign {
+                name,
+                value: Box::new(value),
+            }),
+            _ => Err(ParseError::new(
+                "Invalid assignment target",
+                &self.filename,
+                &self.previous,
+            )),
         }
     }
 
@@ -243,13 +270,45 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
-    fn parse_fn(&mut self) -> Result<Stmt, ParseError> {
-        self.advance(); // consume `fn`
+    fn parse_if(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume if
 
-        let name_token = self.advance(); // TODO: watch this
-        let name = match &name_token.kind {
+        let condition = self.parse_expr()?;
+        self.consume_token(TokenKind::LeftBrace, "Expected '{' after if condition")?;
+
+        let body = self.parse_block()?;
+
+        let else_body = if self.match_token(&TokenKind::Else) {
+            if self.peek().kind == TokenKind::If {
+                let stmt = self.parse_if()?;
+                Some(vec![stmt])
+            } else {
+                self.consume_token(TokenKind::LeftBrace, "Expected '{' after else")?;
+                Some(self.parse_block()?)
+            }
+        } else {
+            None
+        };
+
+        Ok(Stmt::If {
+            condition,
+            body,
+            else_body,
+        })
+    }
+
+    fn parse_fn(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume fn
+
+        let name = match &self.advance().kind {
             TokenKind::Identifier(name) => name.clone(),
-            _ => return Err(ParseError::new("Expected function name", name_token)),
+            _ => {
+                return Err(ParseError::new(
+                    "Expected function name",
+                    &self.filename,
+                    self.peek(),
+                ));
+            }
         };
 
         self.consume_token(TokenKind::LeftParen, "Expected '(' after function name")?;
@@ -259,14 +318,20 @@ impl<'a> Parser<'a> {
             loop {
                 let ident = match &self.advance().kind {
                     TokenKind::Identifier(name) => name.clone(),
-                    _ => return Err(ParseError::new("Expected parameter name", &self.previous)),
+                    _ => {
+                        return Err(ParseError::new(
+                            "Expected parameter name",
+                            &self.filename,
+                            self.peek(),
+                        ));
+                    }
                 };
 
                 self.consume_token(TokenKind::Colon, "Expected ':' after parameter name")?;
 
                 let ty = self
                     .parse_type()
-                    .ok_or_else(|| ParseError::new("Expected type", self.peek()))?;
+                    .ok_or_else(|| ParseError::new("Expected type", &self.filename, self.peek()))?;
 
                 params.push((ident, ty));
 
@@ -281,13 +346,15 @@ impl<'a> Parser<'a> {
         if arity > constants::MAX_ARITY {
             return Err(ParseError::new(
                 "Function arity exceeds maximum limit",
-                &self.peek(),
+                &self.filename,
+                self.peek(),
             ));
         }
 
         let return_type = if self.match_token(&TokenKind::Arrow) {
-            self.parse_type()
-                .ok_or_else(|| ParseError::new("Expected return type", self.peek()))?
+            self.parse_type().ok_or_else(|| {
+                ParseError::new("Expected return type", &self.filename, self.peek())
+            })?
         } else {
             Type::Umbra
         };
@@ -312,7 +379,8 @@ impl<'a> Parser<'a> {
             _ => {
                 return Err(ParseError::new(
                     "expected identifier in const declaration",
-                    &self.peek(),
+                    &self.filename,
+                    self.peek(),
                 ));
             }
         };
@@ -323,9 +391,9 @@ impl<'a> Parser<'a> {
             "expected ':' after identifier in const declaration",
         )?;
 
-        let ty = self
-            .parse_type()
-            .ok_or_else(|| ParseError::new("expected type after ':'", &self.peek()))?;
+        let ty = self.parse_type().ok_or_else(|| {
+            ParseError::new("expected type after ':'", &self.filename, self.peek())
+        })?;
 
         self.consume_token(
             TokenKind::Equal,
@@ -347,7 +415,8 @@ impl<'a> Parser<'a> {
             _ => {
                 return Err(ParseError::new(
                     "expected identifier in let declaration",
-                    &self.peek(),
+                    &self.filename,
+                    self.peek(),
                 ));
             }
         };
@@ -358,9 +427,9 @@ impl<'a> Parser<'a> {
             "expected ':' after identifier in let declaration",
         )?;
 
-        let ty = self
-            .parse_type()
-            .ok_or_else(|| ParseError::new("Expected type after ':'", self.peek()))?;
+        let ty = self.parse_type().ok_or_else(|| {
+            ParseError::new("Expected type after ':'", &self.filename, self.peek())
+        })?;
 
         self.consume_token(
             TokenKind::Equal,
@@ -379,7 +448,11 @@ impl<'a> Parser<'a> {
             TokenKind::True => Ok(Expr::Bool(true)),
             TokenKind::False => Ok(Expr::Bool(false)),
             TokenKind::Umbra => Ok(Expr::Umbra),
-            _ => Err(ParseError::new("Expected literal", &self.previous)),
+            _ => Err(ParseError::new(
+                "Expected literal",
+                &self.filename,
+                self.peek(),
+            )),
         }
     }
 
@@ -387,17 +460,20 @@ impl<'a> Parser<'a> {
         if let TokenKind::String(ref s) = self.previous.kind {
             Ok(Expr::String(s.clone()))
         } else {
-            Err(ParseError::new("Expected string", &self.previous))
+            Err(ParseError::new(
+                "Expected string",
+                &self.filename,
+                self.peek(),
+            ))
         }
     }
 
     fn parse_precedence(&mut self, min_prec: Precedence) -> Result<Expr, ParseError> {
         let token = self.advance().clone();
-        // println!("🔹 [parse_precedence] {:?}", token);
         let prefix_rule = self
             .get_rule(&token.kind)
             .prefix
-            .ok_or_else(|| ParseError::new("Expected expression", &token))?;
+            .ok_or_else(|| ParseError::new("Expected expression", &self.filename, self.peek()))?;
 
         let mut left = prefix_rule(self)?;
 
@@ -428,13 +504,30 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_logical(&mut self, left: Expr) -> Result<Expr, ParseError> {
+        let op = match self.previous.kind {
+            TokenKind::AndAnd => LogicalOp::AndAnd,
+            TokenKind::OrOr => LogicalOp::OrOr,
+            _ => unreachable!(), // TODO: handle error
+        };
+
+        let right = self.parse_precedence(Precedence::And)?;
+        Ok(Expr::Logical {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        })
+    }
+
     fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
         match self.peek().kind {
             TokenKind::Constellation => self.parse_constellation(),
             TokenKind::Const => self.parse_const(),
             TokenKind::Let => self.parse_let(),
             TokenKind::Fn => self.parse_fn(),
+            TokenKind::If => self.parse_if(),
             TokenKind::Emit => self.parse_emit(),
+            TokenKind::Return => self.parse_return(),
             _ => self.parse_expr_stmt(),
         }
     }
@@ -443,7 +536,13 @@ impl<'a> Parser<'a> {
         self.advance(); // consume constellation
         let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
-            _ => return Err(ParseError::new("Expected identifier", &self.peek())),
+            _ => {
+                return Err(ParseError::new(
+                    "Expected identifier",
+                    &self.filename,
+                    self.peek(),
+                ));
+            }
         };
 
         self.advance(); // consume identifier
@@ -454,6 +553,19 @@ impl<'a> Parser<'a> {
         )?;
 
         Ok(Stmt::ConstellationDecl(name))
+    }
+
+    fn parse_return(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume return
+        let value = if !self.match_token(&TokenKind::Semicolon) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        self.consume_token(TokenKind::Semicolon, "Expected ';' after return")?;
+
+        Ok(Stmt::Return(value))
     }
 
     fn parse_type(&mut self) -> Option<Type> {
@@ -476,6 +588,16 @@ impl<'a> Parser<'a> {
     fn get_rule(&self, kind: &TokenKind) -> ParseRule<'a> {
         use TokenKind::*;
         match kind {
+            OrOr => ParseRule {
+                prefix: None,
+                infix: Some(Parser::parse_logical),
+                precedence: Precedence::Or,
+            },
+            AndAnd => ParseRule {
+                prefix: None,
+                infix: Some(Parser::parse_logical),
+                precedence: Precedence::And,
+            },
             Bang => ParseRule {
                 prefix: Some(Parser::parse_unary),
                 infix: None,
@@ -521,42 +643,27 @@ impl<'a> Parser<'a> {
                 infix: Some(Parser::parse_binary),
                 precedence: Precedence::Term,
             },
-            Star => ParseRule {
-                prefix: None,
-                infix: Some(Parser::parse_binary),
-                precedence: Precedence::Factor,
-            },
             Minus => ParseRule {
                 prefix: Some(Parser::parse_unary),
                 infix: Some(Parser::parse_binary),
                 precedence: Precedence::Term,
             },
-            Slash => ParseRule {
+            Star | Slash | Percent => ParseRule {
                 prefix: None,
                 infix: Some(Parser::parse_binary),
                 precedence: Precedence::Factor,
             },
-            Percent => ParseRule {
+            PlusEqual | MinusEqual | StarEqual | SlashEqual | PercentEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::parse_binary),
-                precedence: Precedence::Factor,
+                infix: Some(Parser::parse_arithmetic_assignment),
+                precedence: Precedence::Assignment,
             },
             LeftParen => ParseRule {
                 prefix: Some(Parser::parse_grouping),
                 infix: Some(Parser::parse_call),
                 precedence: Precedence::Call,
             },
-            True => ParseRule {
-                prefix: Some(Parser::parse_literal),
-                infix: None,
-                precedence: Precedence::None,
-            },
-            False => ParseRule {
-                prefix: Some(Parser::parse_literal),
-                infix: None,
-                precedence: Precedence::None,
-            },
-            Umbra => ParseRule {
+            True | False | Umbra => ParseRule {
                 prefix: Some(Parser::parse_literal),
                 infix: None,
                 precedence: Precedence::None,
@@ -570,6 +677,11 @@ impl<'a> Parser<'a> {
                 prefix: Some(Parser::parse_identifier),
                 infix: None,
                 precedence: Precedence::None,
+            },
+            Equal => ParseRule {
+                prefix: None,
+                infix: Some(Parser::parse_assignment),
+                precedence: Precedence::Assignment,
             },
             _ => ParseRule {
                 prefix: None,

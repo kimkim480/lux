@@ -7,5 +7,3 @@ fn Prism() {
   let a: Light = a + 1;
   emit a; // test: <2>
 }
-
-Prism();

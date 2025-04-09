@@ -1,0 +1,14 @@
+constellation main;
+
+fn fact(n: Light) -> Light {
+  if n <= 1 {
+    return 1;
+  } else {
+    return n * fact(n - 1);
+  }
+}
+
+fn Prism() {
+  emit fact(5); // test: <120>
+  emit fact(0); // test: <1>
+}

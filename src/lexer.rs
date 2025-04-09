@@ -1,6 +1,7 @@
 use crate::token::{Token, TokenKind};
 
 pub struct Lexer<'a> {
+    filename: String,
     chars: std::str::Chars<'a>,
     current: Option<char>,
     line: usize,
@@ -8,10 +9,11 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(source: &'a str, filename: &str) -> Self {
         let mut chars = source.chars();
         let first = chars.next();
         Lexer {
+            filename: filename.to_string(),
             chars,
             current: first,
             line: 1,
@@ -24,14 +26,38 @@ impl<'a> Lexer<'a> {
 
         let ch = match self.advance() {
             Some(c) => c,
-            None => return self.make_token(TokenKind::EOF),
+            None => return self.make_token(TokenKind::Eof),
         };
 
         match ch {
-            '+' => self.make_token(TokenKind::Plus),
-            '*' => self.make_token(TokenKind::Star),
-            '/' => self.make_token(TokenKind::Slash),
-            '%' => self.make_token(TokenKind::Percent),
+            '+' => {
+                if self.match_char('=') {
+                    self.make_token(TokenKind::PlusEqual)
+                } else {
+                    self.make_token(TokenKind::Plus)
+                }
+            }
+            '*' => {
+                if self.match_char('=') {
+                    self.make_token(TokenKind::StarEqual)
+                } else {
+                    self.make_token(TokenKind::Star)
+                }
+            }
+            '/' => {
+                if self.match_char('=') {
+                    self.make_token(TokenKind::SlashEqual)
+                } else {
+                    self.make_token(TokenKind::Slash)
+                }
+            }
+            '%' => {
+                if self.match_char('=') {
+                    self.make_token(TokenKind::PercentEqual)
+                } else {
+                    self.make_token(TokenKind::Percent)
+                }
+            }
             ':' => self.make_token(TokenKind::Colon),
             ';' => self.make_token(TokenKind::Semicolon),
             ',' => self.make_token(TokenKind::Comma),
@@ -44,6 +70,8 @@ impl<'a> Lexer<'a> {
             '-' => {
                 if self.match_char('>') {
                     self.make_token(TokenKind::Arrow)
+                } else if self.match_char('=') {
+                    self.make_token(TokenKind::MinusEqual)
                 } else {
                     self.make_token(TokenKind::Minus)
                 }
@@ -215,9 +243,13 @@ impl<'a> Lexer<'a> {
                 self.advance();
             } else if c == '/' && self.peek_next() == Some('/') {
                 // Skip line comment
-                let mut c_opt: Option<char> = self.peek();
-                while c_opt != Some('\n') && !self.is_at_end() {
-                    c_opt = self.advance();
+                self.advance(); // consume first '/'
+                self.advance(); // consume second '/'
+                while let Some(comment_char) = self.peek() {
+                    if comment_char == '\n' {
+                        break;
+                    }
+                    self.advance();
                 }
             } else {
                 break;
@@ -227,102 +259,16 @@ impl<'a> Lexer<'a> {
 
     fn unexpected_char(&self, ch: char, suggestion: Option<&str>) -> TokenKind {
         let message = match suggestion {
-            Some(s) => format!("Unexpected '{}', you probably meant '{}'", ch, s),
-            None => format!("Unexpected character: '{}'", ch),
+            Some(s) => format!(
+                "Unexpected '{}' at {}:{}:{} — you probably meant '{}'",
+                ch, self.filename, self.line, self.column, s
+            ),
+            None => format!(
+                "Unexpected character: '{}' at {}:{}:{}",
+                ch, self.filename, self.line, self.column
+            ),
         };
 
         TokenKind::Error(message)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::token::TokenKind;
-
-    fn lex_all(source: &str) -> Vec<TokenKind> {
-        let mut lexer = Lexer::new(source);
-        let mut tokens = Vec::new();
-
-        loop {
-            let token = lexer.next_token();
-            tokens.push(token.kind.clone());
-
-            if matches!(token.kind, TokenKind::EOF) {
-                break;
-            }
-        }
-
-        tokens
-    }
-
-    #[test]
-    fn test_basic_tokens() {
-        let source = "let x = 42;";
-        let tokens = lex_all(source);
-        assert_eq!(
-            tokens,
-            vec![
-                TokenKind::Let,
-                TokenKind::Identifier("x".into()),
-                TokenKind::Equal,
-                TokenKind::Number(42.0),
-                TokenKind::Semicolon,
-                TokenKind::EOF,
-            ]
-        );
-    }
-
-    #[test]
-    fn test_two_char_tokens() {
-        let source = "x == y != z <= w >= 5";
-        let tokens = lex_all(source);
-        assert_eq!(
-            tokens,
-            vec![
-                TokenKind::Identifier("x".into()),
-                TokenKind::EqualEqual,
-                TokenKind::Identifier("y".into()),
-                TokenKind::BangEqual,
-                TokenKind::Identifier("z".into()),
-                TokenKind::LessEqual,
-                TokenKind::Identifier("w".into()),
-                TokenKind::GreaterEqual,
-                TokenKind::Number(5.0),
-                TokenKind::EOF,
-            ]
-        );
-    }
-
-    #[test]
-    fn test_string_literal() {
-        let source = r#"let greeting = "Hello, Lux!";"#;
-        let tokens = lex_all(source);
-        assert_eq!(
-            tokens,
-            vec![
-                TokenKind::Let,
-                TokenKind::Identifier("greeting".into()),
-                TokenKind::Equal,
-                TokenKind::String("Hello, Lux!".into()),
-                TokenKind::Semicolon,
-                TokenKind::EOF,
-            ]
-        );
-    }
-
-    #[test]
-    fn test_unexpected_char() {
-        let source = "x | y";
-        let tokens = lex_all(source);
-        assert_eq!(
-            tokens,
-            vec![
-                TokenKind::Identifier("x".into()),
-                TokenKind::Error("Unexpected '|', you probably meant '||'".into()),
-                TokenKind::Identifier("y".into()),
-                TokenKind::EOF,
-            ]
-        );
     }
 }

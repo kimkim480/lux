@@ -27,7 +27,7 @@ Init          ::= LetDecl | ExprStmt ;
 Condition     ::= Expr ;
 Post          ::= Assign | Unary ;
 
-IfStmt        ::= "if" ( Condition | LetDecl ) Block [ "else" ( Block | IfStmt ) ] ;
+IfStmt        ::= "if" ( Condition ) Block [ "else" ( Block | IfStmt ) ] ;
 SwitchStmt    ::= "switch" Expr "{" { Case } "}" ;
 Case          ::= "case" Expr ":" Block | "default" ":" Block ;
 

@@ -23,18 +23,47 @@ pub enum BinaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum LogicalOp {
+    OrOr,   // ||
+    AndAnd, // &&
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
     Bang,  // !
     Minus, // -
 }
 
-#[derive(PartialEq, PartialOrd)]
-enum Precedence {
-    Lowest,
+#[derive(Debug, PartialEq, PartialOrd)]
+pub enum Precedence {
+    None,
+    Assignment, // =
+    Or,         // ||
+    And,        // &&
     Equality,   // ==, !=
     Comparison, // <, >, <=, >=
     Term,       // + -
-    Factor,     // * /
+    Factor,     // * / %
+    Unary,      // ! -
+    Call,       // function calls
+}
+
+impl Precedence {
+    pub fn next(self) -> Precedence {
+        use Precedence::*;
+        match self {
+            None => Assignment,
+            Assignment => Or,
+            Or => And,
+            And => Equality,
+            Equality => Comparison,
+            Comparison => Term,
+            Term => Factor,
+            Factor => Unary,
+            Unary => Call,
+            Call => Call, // or Highest
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +73,20 @@ pub enum Expr {
     Identifier(String),
     Umbra,
     Bool(bool),
+    Assign {
+        name: String,
+        value: Box<Expr>,
+    },
+    AssignOp {
+        name: String,
+        op: BinaryOp,
+        value: Box<Expr>,
+    },
+    Logical {
+        left: Box<Expr>,
+        op: LogicalOp,
+        right: Box<Expr>,
+    },
     Binary {
         left: Box<Expr>,
         op: BinaryOp,
@@ -78,7 +121,13 @@ pub enum Stmt {
         ty: Type,
         value: Expr,
     },
+    If {
+        condition: Expr,
+        body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,
+    },
+    Return(Option<Expr>),
     ConstellationDecl(String),
-    ExprStmt(Expr),
-    EmitStmt(Expr),
+    Expr(Expr),
+    Emit(Expr),
 }
