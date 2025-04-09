@@ -270,6 +270,49 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
+    fn parse_for(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume for
+
+        self.consume_token(TokenKind::LeftParen, "Expected '(' after 'for'")?;
+
+        let init = if self.peek().kind != TokenKind::Semicolon {
+            Some(Box::new(self.parse_statement()?))
+        } else {
+            self.advance(); // skip ';'
+            None
+        };
+
+        let condition = if self.peek().kind != TokenKind::Semicolon {
+            let cond = self.parse_expr()?;
+            self.consume_token(
+                TokenKind::Semicolon,
+                "Expected ';' after condition in for loop",
+            )?;
+            Some(cond)
+        } else {
+            self.advance();
+            None
+        };
+
+        let post = if self.peek().kind != TokenKind::RightParen {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        self.consume_token(TokenKind::RightParen, "Expected ')' after for clause")?;
+        self.consume_token(TokenKind::LeftBrace, "Expected '{' after for clause")?;
+
+        let body = self.parse_block()?;
+
+        Ok(Stmt::For {
+            init,
+            condition,
+            post,
+            body,
+        })
+    }
+
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume if
 
@@ -526,8 +569,11 @@ impl<'a> Parser<'a> {
             TokenKind::Let => self.parse_let(),
             TokenKind::Fn => self.parse_fn(),
             TokenKind::If => self.parse_if(),
+            TokenKind::For => self.parse_for(),
             TokenKind::Emit => self.parse_emit(),
             TokenKind::Return => self.parse_return(),
+            TokenKind::Break => self.parse_break(),
+            TokenKind::Continue => self.parse_continue(),
             _ => self.parse_expr_stmt(),
         }
     }
@@ -566,6 +612,18 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenKind::Semicolon, "Expected ';' after return")?;
 
         Ok(Stmt::Return(value))
+    }
+
+    fn parse_break(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'break'
+        self.consume_token(TokenKind::Semicolon, "Expected ';' after break")?;
+        Ok(Stmt::Break)
+    }
+
+    fn parse_continue(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'continue'
+        self.consume_token(TokenKind::Semicolon, "Expected ';' after continue")?;
+        Ok(Stmt::Continue)
     }
 
     fn parse_type(&mut self) -> Option<Type> {

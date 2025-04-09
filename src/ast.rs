@@ -126,8 +126,16 @@ pub enum Stmt {
         body: Vec<Stmt>,
         else_body: Option<Vec<Stmt>>,
     },
+    For {
+        init: Option<Box<Stmt>>,
+        condition: Option<Expr>,
+        post: Option<Expr>,
+        body: Vec<Stmt>,
+    },
     Return(Option<Expr>),
     ConstellationDecl(String),
     Expr(Expr),
     Emit(Expr),
+    Break,
+    Continue,
 }

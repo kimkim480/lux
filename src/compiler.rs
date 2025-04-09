@@ -9,12 +9,20 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
+struct LoopContext {
+    start: usize,               // where to jump to on continue
+    break_jumps: Vec<usize>,    // places to patch at loop exit
+    continue_jumps: Vec<usize>, // places to patch before post
+}
+
+#[derive(Clone, Debug)]
 pub struct Compiler {
     filename: String,
     ast: Vec<Stmt>,
     pub globals: HashMap<String, Value>,
     pub context: CompilerContext,
     pub enclosing: Option<Rc<RefCell<Compiler>>>,
+    loop_stack: Vec<LoopContext>,
 }
 
 impl Compiler {
@@ -47,6 +55,7 @@ impl Compiler {
             globals: HashMap::new(),
             context,
             enclosing: None,
+            loop_stack: Vec::new(),
         })))
     }
 
@@ -138,6 +147,7 @@ impl Compiler {
                         next_slot: 0,
                     },
                     enclosing: Some(parent),
+                    loop_stack: Vec::new(),
                 }));
 
                 for (param_name, _) in params.iter() {
@@ -173,6 +183,64 @@ impl Compiler {
                     self.emit(Op::SetLocal(slot));
                 }
             }
+            Stmt::For {
+                init,
+                condition,
+                post,
+                body,
+            } => {
+                if let Some(init) = init {
+                    self.compile_stmt(init)?;
+                }
+
+                let mut loop_ctx = LoopContext {
+                    start: 0,
+                    break_jumps: vec![],
+                    continue_jumps: vec![],
+                };
+
+                let cond_jump = if let Some(condition) = condition {
+                    let cond_start = self.current_ip();
+                    loop_ctx.start = cond_start;
+                    self.compile_expr(condition)?;
+                    let exit_jump = self.current_ip();
+                    self.emit(Op::JumpIfFalse(usize::MAX));
+                    self.emit(Op::Pop);
+                    Some(exit_jump)
+                } else {
+                    let start = self.current_ip();
+                    loop_ctx.start = start;
+                    None
+                };
+
+                self.loop_stack.push(loop_ctx.clone());
+
+                self.compile_stmts(body)?;
+
+                let post_start = self.current_ip();
+
+                if let Some(post) = post {
+                    self.compile_expr(post)?;
+                    self.emit(Op::Pop);
+                }
+
+                self.emit(Op::Jump(loop_ctx.start));
+
+                let end = self.current_ip();
+                let ctx = self.loop_stack.pop().unwrap();
+
+                // Patch break and continue jumps
+                for jump in ctx.break_jumps {
+                    self.emit_at(Op::Jump(end), jump);
+                }
+                for jump in ctx.continue_jumps {
+                    self.emit_at(Op::Jump(post_start), jump);
+                }
+
+                if let Some(cond_jump) = cond_jump {
+                    self.emit_at(Op::JumpIfFalse(end), cond_jump);
+                }
+            }
             Stmt::If {
                 condition,
                 body,
@@ -180,17 +248,17 @@ impl Compiler {
             } => {
                 Self::compile_expr(self, condition)?;
 
-                let else_pos = self.context.function.borrow().chunk.code.len();
+                let else_pos = self.current_ip();
                 self.emit(Op::JumpIfFalse(usize::MAX));
 
                 self.emit(Op::Pop);
 
                 self.compile_stmts(body)?;
 
-                let jump_pos = self.context.function.borrow().chunk.code.len();
+                let jump_pos = self.current_ip();
                 self.emit(Op::Jump(usize::MAX));
 
-                let else_start = self.context.function.borrow().chunk.code.len();
+                let else_start = self.current_ip();
                 self.emit_at(Op::JumpIfFalse(else_start), else_pos);
 
                 self.emit(Op::Pop);
@@ -199,9 +267,37 @@ impl Compiler {
                     self.compile_stmts(else_body)?;
                 }
 
-                let after = self.context.function.borrow().chunk.code.len();
+                let after = self.current_ip();
                 self.emit_at(Op::Jump(after), jump_pos);
             }
+            Stmt::Break => {
+                if let Some(ctx) = self.loop_stack.last() {
+                    let jump_pos = self.current_ip();
+                    self.emit(Op::Jump(usize::MAX));
+                    self.loop_stack
+                        .last_mut()
+                        .unwrap()
+                        .break_jumps
+                        .push(jump_pos);
+                } else {
+                    return Err(PrismError::Compile("`break` outside of loop".into()));
+                }
+            }
+
+            Stmt::Continue => {
+                if let Some(ctx) = self.loop_stack.last() {
+                    let jump_pos = self.current_ip();
+                    self.emit(Op::Jump(usize::MAX));
+                    self.loop_stack
+                        .last_mut()
+                        .unwrap()
+                        .continue_jumps
+                        .push(jump_pos);
+                } else {
+                    return Err(PrismError::Compile("`continue` outside of loop".into()));
+                }
+            }
+
             Stmt::Return(expr_opt) => {
                 match expr_opt {
                     Some(expr) => {
@@ -320,29 +416,29 @@ impl Compiler {
 
                 match op {
                     LogicalOp::OrOr => {
-                        let jump_pos = self.context.function.borrow().chunk.code.len();
+                        let jump_pos = self.current_ip();
                         self.emit(Op::JumpIfFalse(usize::MAX));
                         self.emit(Op::Jump(usize::MAX));
 
                         // Patch the jump if false
-                        let after = self.context.function.borrow().chunk.code.len();
+                        let after = self.current_ip();
                         self.emit_at(Op::JumpIfFalse(after), jump_pos);
 
                         self.emit(Op::Pop);
                         Self::compile_expr(self, right)?;
 
-                        let after = self.context.function.borrow().chunk.code.len();
+                        let after = self.current_ip();
                         self.emit_at(Op::Jump(after), jump_pos + 1);
                     }
                     LogicalOp::AndAnd => {
-                        let jump_pos = self.context.function.borrow().chunk.code.len();
+                        let jump_pos = self.current_ip();
                         self.emit(Op::JumpIfFalse(usize::MAX));
 
                         self.emit(Op::Pop);
                         Self::compile_expr(self, right)?;
 
                         // Patch the jump if false
-                        let after = self.context.function.borrow().chunk.code.len();
+                        let after = self.current_ip();
                         self.emit_at(Op::JumpIfFalse(after), jump_pos);
                     }
                 }
@@ -404,6 +500,10 @@ impl Compiler {
         }
 
         None
+    }
+
+    fn current_ip(&self) -> usize {
+        self.context.function.borrow().chunk.code.len()
     }
 
     fn emit(&mut self, op: Op) {

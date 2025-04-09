@@ -1,0 +1,18 @@
+constellation main;
+
+fn Prism() {
+  let lamb: Light = closure();
+  
+  lamb();
+  emit lamb();
+}
+
+fn closure() {
+  let i: Light = 0;
+
+  fn inc() {
+    return i += 1;
+  }
+
+  return inc;
+}

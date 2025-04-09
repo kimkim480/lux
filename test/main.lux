@@ -2,18 +2,18 @@
 constellation main;
 
 fn Prism() {
-  let lamb: Light = closure();
-  
-  lamb();
-  emit lamb();
-}
 
-fn closure() {
-  let i: Light = 0;
-
-  fn inc() {
-    return i += 1;
+  for (let i: Light = 0; i < 3; i = i + 1) {
+    emit i; // test: <0> <1> <2>
   }
 
-  return inc;
+  let i: Light = 0;
+  for (;;) {
+    emit i;
+    i += 1;
+    if i >= 3 {
+      break;
+    }
+  }
+
 }
