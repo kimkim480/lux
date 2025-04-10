@@ -4,6 +4,7 @@ pub enum Type {
     Lumens,
     Umbra,
     Photon,
+    Lambda,
     Custom(String), // for user-defined types
 }
 
@@ -99,6 +100,12 @@ pub enum Expr {
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
+    },
+    Lambda {
+        params: Vec<(String, Type)>,
+        body: Vec<Stmt>,
+        arity: usize,
+        return_type: Type,
     },
 }
 

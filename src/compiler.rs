@@ -465,6 +465,63 @@ impl Compiler {
                     }
                 }
             }
+
+            Expr::Lambda {
+                params,
+                body,
+                arity,
+                ..
+            } => {
+                let function = Rc::new(RefCell::new(Function {
+                    name: "<lambda>".to_string(),
+                    arity: *arity,
+                    chunk: Chunk {
+                        code: Vec::new(),
+                        constants: Vec::new(),
+                    },
+                    upvalue_count: 0,
+                }));
+
+                let parent = Rc::new(RefCell::new(self.clone()));
+
+                let nested = Rc::new(RefCell::new(Compiler {
+                    filename: self.filename.clone(),
+                    ast: body.clone(),
+                    globals: self.globals.clone(),
+                    context: CompilerContext {
+                        function: function.clone(),
+                        upvalues: vec![],
+                        scopes: vec![HashMap::new()],
+                        is_global_scope: false,
+                        next_slot: 0,
+                    },
+                    enclosing: Some(parent),
+                    loop_stack: vec![],
+                }));
+
+                for (param_name, _) in params.iter() {
+                    nested.borrow_mut().context.declare_local(param_name);
+                }
+
+                nested.borrow_mut().context.begin_scope();
+                nested.borrow_mut().compile_stmts(body)?;
+                nested.borrow_mut().context.end_scope();
+
+                let index = nested.borrow_mut().add_constant(Value::Umbra);
+                nested.borrow_mut().emit(Op::Constant(index));
+                nested.borrow_mut().emit(Op::Return);
+
+                let fn_index = self.add_constant(Value::Function(function.clone()));
+                let upvalues = nested
+                    .borrow()
+                    .context
+                    .upvalues
+                    .iter()
+                    .map(|u| (u.is_local, u.index))
+                    .collect();
+
+                self.emit(Op::Closure { fn_index, upvalues });
+            }
         }
 
         Ok(())

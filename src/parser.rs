@@ -240,7 +240,7 @@ impl<'a> Parser<'a> {
             Err(ParseError::new(
                 "Expected identifier",
                 &self.filename,
-                self.peek(),
+                &self.previous,
             ))
         }
     }
@@ -259,6 +259,63 @@ impl<'a> Parser<'a> {
                 &self.previous,
             )),
         }
+    }
+
+    fn parse_lambda(&mut self) -> Result<Expr, ParseError> {
+        self.consume_token(TokenKind::LeftParen, "Expected '(' after 'fn'")?;
+
+        let mut params = Vec::new();
+        if self.peek().kind != TokenKind::RightParen {
+            loop {
+                self.advance();
+                let name_expr = self.parse_identifier()?;
+                let name = match name_expr {
+                    Expr::Identifier(name) => name,
+                    _ => unreachable!(),
+                };
+
+                self.consume_token(TokenKind::Colon, "Expected ':' after parameter name")?;
+                let ty = self
+                    .parse_type()
+                    .ok_or_else(|| ParseError::new("Expected type", &self.filename, self.peek()))?;
+
+                params.push((name, ty));
+
+                if !self.match_token(&TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+
+        let arity = params.len();
+        if arity > constants::MAX_ARITY {
+            return Err(ParseError::new(
+                "Lambda arity exceeds maximum limit",
+                &self.filename,
+                self.peek(),
+            ));
+        }
+
+        self.consume_token(TokenKind::RightParen, "Expected ')' after parameters")?;
+
+        let return_type = if self.match_token(&TokenKind::Arrow) {
+            self.parse_type().ok_or_else(|| {
+                ParseError::new("Expected return type", &self.filename, self.peek())
+            })?
+        } else {
+            Type::Umbra
+        };
+
+        self.consume_token(TokenKind::LeftBrace, "Expected '{' before lambda body")?;
+
+        let body = self.parse_block()?;
+
+        Ok(Expr::Lambda {
+            arity,
+            params,
+            body,
+            return_type,
+        })
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
@@ -634,6 +691,7 @@ impl<'a> Parser<'a> {
             TokenKind::Lumens => Some(Type::Lumens),
             TokenKind::Umbra => Some(Type::Umbra),
             TokenKind::Photon => Some(Type::Photon),
+            TokenKind::Lambda => Some(Type::Lambda),
             TokenKind::Identifier(name) => Some(Type::Custom(name.clone())),
             _ => None,
         }
@@ -740,6 +798,11 @@ impl<'a> Parser<'a> {
                 prefix: None,
                 infix: Some(Parser::parse_assignment),
                 precedence: Precedence::Assignment,
+            },
+            Fn => ParseRule {
+                prefix: Some(Parser::parse_lambda),
+                infix: None,
+                precedence: Precedence::None,
             },
             _ => ParseRule {
                 prefix: None,

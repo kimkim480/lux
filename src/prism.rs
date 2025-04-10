@@ -94,6 +94,7 @@ impl Prism {
                 let mut u = up.borrow_mut();
                 if let Upvalue::Open(i) = *u {
                     if i >= from_index {
+                        println!("🔐 Closing upvalue at stack[{}] = {:?}", i, self.stack[i]);
                         let value = self.stack[i].clone();
                         *u = Upvalue::Closed(value);
                     }
@@ -344,11 +345,11 @@ impl Prism {
 
                 Op::Return => {
                     let return_value = self.pop()?; // 1. get return value
-                    let frame = self.frames.pop().unwrap(); // 2. pop frame
-                    self.close_upvalues(frame.offset); // 3. close captured vars
+                    self.frames.pop(); // 2. pop frame
+                    self.close_upvalues(self.stack.len()); // 3. close captured vars
 
                     // 4. remove locals from stack
-                    self.stack.truncate(frame.offset);
+                    self.stack.truncate(self.stack.len());
 
                     // 5. push return value for caller
                     self.push(return_value)?;

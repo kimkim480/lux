@@ -3,17 +3,12 @@ constellation main;
 
 fn Prism() {
 
-  for (let i: Light = 0; i < 3; i = i + 1) {
-    emit i; // test: <0> <1> <2>
-  }
+  let pow2: Lambda = fn(x: Light) {
+    return x * x;
+  };
 
-  let i: Light = 0;
-  for (;;) {
-    emit i;
-    i += 1;
-    if i >= 3 {
-      break;
-    }
+  for (let i: Light = 0; i < 10; i += 1) {
+    emit pow2(i);
   }
 
 }

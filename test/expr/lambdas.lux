@@ -1,0 +1,44 @@
+// skip
+constellation main;
+
+fn Prism() {
+  let f: Lambda = fn() {
+    emit "simple"; // test: <simple>
+  };
+  f();
+
+  emit "---"; // separator
+  test_closure();
+  test_loop_capture();
+  test_lambda_return();
+}
+
+fn test_closure() {
+  let msg: Lumens = "Lux";
+  let shout: Lambda = fn() {
+    emit msg; // test: <Lux>
+  };
+  shout();
+}
+
+fn test_loop_capture() {
+  for (let i: Light = 0; i < 3; i = i + 1) {
+    let log: Lambda = fn() {
+      emit i; // test: <0> <1> <2>
+    };
+    log();
+  }
+}
+
+fn make_logger() -> Lambda {
+  let prefix: Lumens = "hi";
+
+  return fn() {
+    emit prefix; // test: <hi>
+  };
+}
+
+fn test_lambda_return() {
+  let log: Lambda = make_logger();
+  log();
+}
