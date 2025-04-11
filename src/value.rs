@@ -55,6 +55,7 @@ pub enum Op {
     Greater,
     GreaterEqual,
     Pop,
+    Dup,
     Print,
     GetGlobal(String),
     SetGlobal(String),
@@ -128,6 +129,7 @@ impl Chunk {
                     }
                 }
                 Op::Pop => println!("{:<21}", "Pop"),
+                Op::Dup => println!("{:<21}", "Dup"),
                 Op::JumpIfFalse(offset) => {
                     println!("{:<21} {:04} -> {:04}", "JumpIfFalse", ip, offset)
                 }

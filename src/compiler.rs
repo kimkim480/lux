@@ -267,6 +267,46 @@ impl Compiler {
                     self.emit_at(Op::JumpIfFalse(end), cond_jump);
                 }
             }
+
+            Stmt::Switch {
+                target,
+                cases,
+                default,
+            } => {
+                self.compile_expr(target)?;
+
+                let mut end_jumps = Vec::new();
+
+                for (match_expr, body) in cases {
+                    self.emit(Op::Dup); // duplicate switch target
+                    self.compile_expr(match_expr)?;
+                    self.emit(Op::Equal);
+
+                    let jump_if_false_pos = self.current_ip();
+                    self.emit(Op::JumpIfFalse(usize::MAX));
+                    self.emit(Op::Pop);
+
+                    self.compile_stmts(body)?;
+                    end_jumps.push(self.current_ip());
+                    self.emit(Op::Jump(usize::MAX));
+
+                    self.emit_at(Op::JumpIfFalse(self.current_ip()), jump_if_false_pos);
+                    self.emit(Op::Pop);
+                }
+
+                if let Some(default_block) = default {
+                    self.emit(Op::Pop);
+                    self.compile_stmts(default_block)?;
+                } else {
+                    self.emit(Op::Pop);
+                }
+
+                let end = self.current_ip();
+                for pos in end_jumps {
+                    self.emit_at(Op::Jump(end), pos);
+                }
+            }
+
             Stmt::If {
                 condition,
                 body,

@@ -370,6 +370,40 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_switch(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'switch'
+
+        let target = self.parse_expr()?;
+        self.consume_token(TokenKind::LeftBrace, "Expected '{' after switch expression")?;
+
+        let mut cases = Vec::new();
+        let mut default = None;
+
+        while !self.match_token(&TokenKind::RightBrace) {
+            if self.match_token(&TokenKind::Case) {
+                let value = self.parse_expr()?;
+                self.consume_token(TokenKind::LeftBrace, "Expected '{' after case value")?;
+                let body = self.parse_block()?;
+                cases.push((value, body));
+            } else if self.match_token(&TokenKind::Default) {
+                self.consume_token(TokenKind::LeftBrace, "Expected '{' after default")?;
+                default = Some(self.parse_block()?);
+            } else {
+                return Err(ParseError::new(
+                    "Expected 'case' or 'default'",
+                    &self.filename,
+                    self.peek(),
+                ));
+            }
+        }
+
+        Ok(Stmt::Switch {
+            target,
+            cases,
+            default,
+        })
+    }
+
     fn parse_if(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume if
 
@@ -538,7 +572,11 @@ impl<'a> Parser<'a> {
 
         let value = self.parse_binary_expr()?;
 
-        self.consume_token(TokenKind::Semicolon, "expected ';' after let declaration")?;
+        if let Expr::Lambda { .. } = value {
+            self.match_token(&TokenKind::Semicolon);
+        } else {
+            self.consume_token(TokenKind::Semicolon, "expected ';' after let declaration")?;
+        }
 
         Ok(Stmt::LetDecl { name, ty, value })
     }
@@ -627,10 +665,11 @@ impl<'a> Parser<'a> {
             TokenKind::Fn => self.parse_fn(),
             TokenKind::If => self.parse_if(),
             TokenKind::For => self.parse_for(),
-            TokenKind::Emit => self.parse_emit(),
-            TokenKind::Return => self.parse_return(),
+            TokenKind::Switch => self.parse_switch(),
             TokenKind::Break => self.parse_break(),
             TokenKind::Continue => self.parse_continue(),
+            TokenKind::Emit => self.parse_emit(),
+            TokenKind::Return => self.parse_return(),
             _ => self.parse_expr_stmt(),
         }
     }

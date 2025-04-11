@@ -4,31 +4,13 @@ constellation main;
 const base: Light = 2;
 
 fn Prism() {
- 
-  fn () {
-    emit "I'm a Lambda λ 
+  let mood: Light = 2;
+
+  switch mood {
+    case 1 { emit "sad"; }
+    case 2 { emit "neutral"; } // test: <neutral>
+    case 3 { emit "happy"; }
+    default { emit "???"; }
   }
-
-}
-
-fn pow(base: Light, exp: Light) -> Light {
-  let r: Light = 1;
-  let curr_b: Light = base;
-  let curr_e: Light = exp;
-
-  for (;;) {
-    if curr_e < 1 {
-      break;
-    }
-
-    if curr_e % 2 == 1 {
-      r = r * curr_b;
-    }
-
-    curr_e = curr_e / 2;
-    curr_b = curr_b * curr_b;
-  }
-
-  return r;
 }
 

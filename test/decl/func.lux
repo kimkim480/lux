@@ -4,7 +4,7 @@ fn Prism() {
   fn bula(x: Light) -> Light {
     return x;
   }
-
+  
   let bula: Light = bula(3);
   emit bula; // test: <3>
 }  

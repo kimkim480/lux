@@ -1,0 +1,40 @@
+constellation Switch;
+
+fn Prism() {
+  emit "--- numbers ---";
+  let x: Light = 2;
+
+  switch x {
+    case 1 { emit "one"; }
+    case 2 { emit "two"; } // test: <two>
+    case 3 { emit "three"; }
+    default { emit "default"; }
+  }
+
+  emit "--- strings ---";
+  let c: Lumens = "*";
+
+  switch c {
+    case "*" { emit "Case found"; } // test: <Case found>
+    case "/" { emit "Other"; }
+    default { emit "Default reached"; }
+  }
+
+  emit "--- no match + default ---";
+  let n: Light = 99;
+
+  switch n {
+    case 0 { emit "zero"; }
+    case 1 { emit "one"; }
+    default { emit "fallback"; } // test: <fallback>
+  }
+
+  emit "--- no match + no default ---";
+  let z: Light = 5;
+  switch z {
+    case 1 { emit "one"; }
+    case 2 { emit "two"; }
+  }
+
+  emit "done"; // test: <done>
+}

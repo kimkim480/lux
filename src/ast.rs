@@ -139,6 +139,11 @@ pub enum Stmt {
         post: Option<Expr>,
         body: Vec<Stmt>,
     },
+    Switch {
+        target: Expr,
+        cases: Vec<(Expr, Vec<Stmt>)>,
+        default: Option<Vec<Stmt>>,
+    },
     Return(Option<Expr>),
     ConstellationDecl(String),
     Expr(Expr),

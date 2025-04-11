@@ -183,6 +183,14 @@ impl Prism {
                 Op::Pop => {
                     self.pop()?;
                 }
+                Op::Dup => {
+                    let top = self
+                        .stack
+                        .last()
+                        .cloned()
+                        .ok_or_else(|| PrismError::Runtime("Nothing to duplicate".into()))?;
+                    self.push(top)?;
+                }
                 Op::Print => {
                     let value = self.pop()?;
                     println!("{}", value);
