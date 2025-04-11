@@ -19,8 +19,8 @@ impl fmt::Display for Value {
             Value::Lumens(s) => write!(f, "{}", s),
             Value::Photon(b) => write!(f, "{}", b),
             Value::Umbra => write!(f, "Umbra"),
-            Value::Function(func) => write!(f, "{}", func.borrow()),
-            Value::Closure(closure) => write!(f, "{:?}", closure),
+            Value::Function(fun) => write!(f, "{}", fun.borrow()),
+            Value::Closure(c) => write!(f, "{}", c.function.borrow()),
         }
     }
 }

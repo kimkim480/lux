@@ -3,6 +3,7 @@
 /target
 
 *.log
+log
 
 *.md
 !README.md

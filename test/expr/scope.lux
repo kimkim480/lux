@@ -14,8 +14,8 @@ fn Prism() {
   let x: Light = 10;
   emit x; // test: <10>
 
-  let x: Lumens = "shadow";
-  emit x; // test: <shadow>
+  let y: Lumens = "shadow";
+  emit y; // test: <shadow>
 
   emit PI; // test: <3.1415>
 }

@@ -2,8 +2,8 @@ constellation main;
 
 fn Prism() {
   let a: Light = 1;
-  emit a; // test: <1>
+  emit a;
 
   let a: Light = a + 1;
-  emit a; // test: <2>
+  emit a; // test: <💥 Compile error: Variable 'a' already declared in this scope>
 }

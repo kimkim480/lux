@@ -95,6 +95,18 @@ impl Compiler {
                     ));
                 }
 
+                if let Some(slot) = self.context.resolve_local(name) {
+                    match self.context.function.borrow().chunk.constants[slot] {
+                        Value::Function(_) => {}
+                        _ => {
+                            return Err(PrismError::Compile(format!(
+                                "Variable '{}' already declared in this scope",
+                                name
+                            )));
+                        }
+                    }
+                }
+
                 Self::compile_expr(self, value)?;
                 let slot = self.context.declare_local(name);
                 self.emit(Op::SetLocal(slot));
@@ -104,6 +116,13 @@ impl Compiler {
                     return Err(PrismError::Compile(
                         " `const` is not allowed at local scope".to_string(),
                     ));
+                }
+
+                if self.globals.contains_key(name) {
+                    return Err(PrismError::Compile(format!(
+                        "Constant '{}' already declared in this scope",
+                        name
+                    )));
                 }
 
                 Self::compile_expr(self, value)?;
@@ -123,6 +142,13 @@ impl Compiler {
                 params,
                 ..
             } => {
+                if self.context.resolve_local(name).is_some() || self.globals.contains_key(name) {
+                    return Err(PrismError::Compile(format!(
+                        "Function '{}' already declared in this scope",
+                        name
+                    )));
+                }
+
                 let function = Rc::new(RefCell::new(Function {
                     name: name.clone(),
                     arity: *arity,
@@ -381,7 +407,12 @@ impl Compiler {
                             self.emit(Op::SetUpvalue(index));
                             self.emit(Op::GetUpvalue(index));
                         }
-                        None => self.emit(Op::SetGlobal(name.clone())),
+                        None => {
+                            return Err(PrismError::Compile(format!(
+                                "Cannot assign to '{}' constant",
+                                name
+                            )));
+                        }
                     },
                 }
             }
@@ -445,25 +476,35 @@ impl Compiler {
             }
 
             Expr::Call { callee, args } => {
+                if let Expr::Identifier(name) = &**callee {
+                    let expected_arity = match self.globals.get(name) {
+                        Some(Value::Function(func)) => Some(func.borrow().arity),
+                        _ => self.context.resolve_local(name).and_then(|slot| {
+                            match self.context.function.borrow().chunk.constants.get(slot) {
+                                Some(Value::Function(func)) => Some(func.borrow().arity),
+                                _ => None,
+                            }
+                        }),
+                    };
+
+                    if let Some(expected) = expected_arity {
+                        if expected != args.len() {
+                            return Err(PrismError::Compile(format!(
+                                "Function '{}' expects {} arguments, but got {}",
+                                name,
+                                expected,
+                                args.len()
+                            )));
+                        }
+                    }
+                }
+
                 for arg in args {
                     Self::compile_expr(self, arg)?;
                 }
 
                 Self::compile_expr(self, callee)?;
                 self.emit(Op::Call(args.len()));
-
-                if let Expr::Identifier(name) = &**callee {
-                    if let Some(Value::Function(func)) = self.globals.get(name) {
-                        if func.borrow().arity != args.len() {
-                            return Err(PrismError::Compile(format!(
-                                "Function '{}' expects {} arguments, but got {}",
-                                name,
-                                func.borrow().arity,
-                                args.len()
-                            )));
-                        }
-                    }
-                }
             }
 
             Expr::Lambda {
