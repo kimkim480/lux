@@ -105,10 +105,6 @@ impl Prism {
 
     pub fn run(&mut self) -> PrismResult<()> {
         loop {
-            // if self.debug_trace {
-            //     self.print_stack_trace();
-            // }
-
             let frame = self.frames.last_mut().unwrap();
             if frame.ip >= frame.function.borrow().chunk.code.len() {
                 break;
@@ -120,8 +116,6 @@ impl Prism {
                     .borrow()
                     .chunk
                     .trace_op(&format!("[{}]", frame.function.borrow().name), frame.ip);
-
-                // println!("stack: {:?}", self.stack);
             }
 
             let op = {
@@ -350,6 +344,74 @@ impl Prism {
                 Op::Jump(offset) => {
                     frame.ip = offset;
                 }
+                Op::MakeArray(n) => {
+                    if self.stack.len() < n {
+                        return Err(PrismError::Runtime(
+                            "Not enough values to form array".into(),
+                        ));
+                    }
+
+                    let start = self.stack.len() - n;
+                    let items = self.stack.drain(start..).collect::<Vec<_>>();
+                    self.push(Value::Array(Rc::new(RefCell::new(items))))?;
+                }
+                Op::ArrayGet => {
+                    let index_val = self.pop()?;
+                    let array_val = self.pop()?;
+
+                    let index = match index_val {
+                        Value::Light(n) if n.fract() == 0.0 => n as usize,
+                        _ => return Err(PrismError::Runtime("Invalid array index".into())),
+                    };
+
+                    match array_val {
+                        Value::Array(arr) => {
+                            if index >= arr.borrow().len() {
+                                return Err(PrismError::Runtime(
+                                    "Array index out of bounds".into(),
+                                ));
+                            }
+                            self.push(arr.borrow()[index].clone())?;
+                        }
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Tried to index non-array value".into(),
+                            ));
+                        }
+                    }
+                }
+                Op::ArraySet => {
+                    let value = self.pop()?;
+                    let index_val = self.pop()?;
+                    let array_val = self.pop()?;
+
+                    println!("value: {:?}", value);
+                    println!("index_val: {:?}", index_val);
+                    println!("array_val: {:?}", array_val);
+
+                    let index = match index_val {
+                        Value::Light(n) if n.fract() == 0.0 => n as usize,
+                        _ => return Err(PrismError::Runtime("Invalid array index".into())),
+                    };
+
+                    match array_val {
+                        Value::Array(arr) => {
+                            if index >= arr.borrow().len() {
+                                return Err(PrismError::Runtime(
+                                    "Array index out of bounds".into(),
+                                ));
+                            }
+
+                            arr.borrow_mut()[index] = value.clone();
+                            self.push(Value::Umbra)?; // set returns nothing
+                        }
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Tried to index non-array value".into(),
+                            ));
+                        }
+                    }
+                }
 
                 Op::Return => {
                     let return_value = self.pop()?; // 1. get return value
@@ -373,28 +435,15 @@ impl Prism {
         Ok(())
     }
 
-    pub fn print_stack_trace(&self) {
-        println!("\n🌌 Prism Stack Trace 🌌");
-        println!("Stack (top ⬆):");
-
-        for (i, val) in self.stack.iter().enumerate().rev() {
-            println!("  [{:02}] {:?}", i, val);
+    fn print_stack_trace(&self) {
+        for (i, val) in self.stack.iter().enumerate() {
+            print!("[{:02}] {}", i, val);
+            if i < self.stack.len() - 1 {
+                print!(" | ");
+            }
         }
-
-        println!("\nFrames:");
-        for (i, frame) in self.frames.iter().enumerate() {
-            let name = &frame.function.borrow().name;
-            println!(
-                "  [{}] fn {} @ ip={} offset={} (locals in stack[{}..{}])",
-                i,
-                name,
-                frame.ip,
-                frame.offset,
-                frame.offset,
-                frame.offset + frame.function.borrow().arity
-            );
+        if self.stack.len() > 0 {
+            print!("\n🔹 Total stack size: {}\n", self.stack.len());
         }
-
-        println!("🔹 Total stack size: {}\n", self.stack.len());
     }
 }

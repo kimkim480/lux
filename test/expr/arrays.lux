@@ -1,0 +1,30 @@
+constellation array;
+
+const global: [Light] = [10, 20, 30];
+
+fn Prism() {
+  global[2] = 3;
+  emit global;
+  emit "create + get"; // test: <create + get>
+  let xs: [Light] = [10, 20, 30];
+  emit xs[0]; // test: <10>
+  emit xs[2]; // test: <30>
+
+  emit "mutation"; // test: <mutation>
+  xs[1] = 99;
+  emit xs[1]; // test: <99>
+
+  emit "multiple arrays"; // test: <multiple arrays>
+  let ys: [Light] = [1, 2];
+  let zs: [Light] = [5, 6];
+  ys[0] = 7;
+  emit ys[0]; // test: <7>
+  emit zs[0]; // test: <5>
+
+  emit "print entire array"; // test: <print entire array>
+  emit xs; // test: <[10, 99, 30]>
+  emit ys; // test: <[7, 2]>
+  emit zs; // test: <[5, 6]>
+
+  emit "done"; // test: <done>
+}

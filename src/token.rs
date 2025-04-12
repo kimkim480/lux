@@ -1,18 +1,20 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Single-character tokens
-    Plus,       // +
-    Star,       // *
-    Slash,      // /
-    Percent,    // %
-    Colon,      // :
-    Semicolon,  // ;
-    Comma,      // ,
-    Dot,        // .
-    LeftParen,  // (
-    RightParen, // )
-    LeftBrace,  // {
-    RightBrace, // }
+    Plus,         // +
+    Star,         // *
+    Slash,        // /
+    Percent,      // %
+    Colon,        // :
+    Semicolon,    // ;
+    Comma,        // ,
+    Dot,          // .
+    LeftParen,    // (
+    RightParen,   // )
+    LeftBracket,  // [
+    RightBracket, // ]
+    LeftBrace,    // {
+    RightBrace,   // }
 
     // One or two character tokens
     PlusEqual,    // +=

@@ -1,0 +1,38 @@
+fn quicksort(xs: [Light], low: Light, high: Light) -> Umbra {
+  if low < high {
+    let p: Light = partition(xs, low, high);
+    quicksort(xs, low, p - 1);
+    quicksort(xs, p + 1, high);
+  }
+}
+
+fn partition(xs: [Light], low: Light, high: Light) -> Light {
+  let pivot: Light = xs[high];
+  let i: Light = low - 1;
+
+  for (let j: Light = low; j < high; j += 1) {
+    if xs[j] <= pivot {
+      i += 1;
+
+      // swap xs[i] and xs[j]
+      let temp: Light = xs[i];
+      xs[i] = xs[j];
+      xs[j] = temp;
+    }
+  }
+
+  // final swap
+  let temp: Light = xs[i + 1];
+  xs[i + 1] = xs[high];
+  xs[high] = temp;
+
+  return i + 1;
+}
+
+fn Prism() {
+  let arr: [Light] = [9, 3, 7, 4, 69, 420, 42];
+
+  quicksort(arr, 0, 6);
+
+  emit arr; // test: <[3, 4, 7, 9, 42, 69, 420]>
+}

@@ -5,6 +5,7 @@ pub enum Type {
     Umbra,
     Photon,
     Lambda,
+    Array(Box<Type>),
     Custom(String), // for user-defined types
 }
 
@@ -107,8 +108,19 @@ pub enum Expr {
         arity: usize,
         return_type: Type,
     },
+    Array {
+        elements: Vec<Expr>,
+    },
+    Index {
+        array: Box<Expr>,
+        index: Box<Expr>,
+    },
+    AssignIndex {
+        array: Box<Expr>,
+        index: Box<Expr>,
+        value: Box<Expr>,
+    },
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     ConstDecl {

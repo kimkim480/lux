@@ -241,7 +241,9 @@ impl Compiler {
 
                 self.loop_stack.push(loop_ctx.clone());
 
+                self.context.begin_scope();
                 self.compile_stmts(body)?;
+                self.context.end_scope();
 
                 let post_start = self.current_ip();
 
@@ -319,7 +321,9 @@ impl Compiler {
 
                 self.emit(Op::Pop);
 
+                self.context.begin_scope();
                 self.compile_stmts(body)?;
+                self.context.end_scope();
 
                 let jump_pos = self.current_ip();
                 self.emit(Op::Jump(usize::MAX));
@@ -330,7 +334,9 @@ impl Compiler {
                 self.emit(Op::Pop);
 
                 if let Some(else_body) = else_body {
+                    self.context.begin_scope();
                     self.compile_stmts(else_body)?;
+                    self.context.end_scope();
                 }
 
                 let after = self.current_ip();
@@ -385,6 +391,30 @@ impl Compiler {
 
     fn compile_expr(&mut self, expr: &Expr) -> Result<(), PrismError> {
         match expr {
+            Expr::Array { elements } => {
+                for element in elements {
+                    self.compile_expr(element)?;
+                }
+                self.emit(Op::MakeArray(elements.len()));
+            }
+
+            Expr::AssignIndex {
+                array,
+                index,
+                value,
+            } => {
+                self.compile_expr(array)?;
+                self.compile_expr(index)?;
+                self.compile_expr(value)?;
+                self.emit(Op::ArraySet);
+            }
+
+            Expr::Index { array, index } => {
+                self.compile_expr(array)?;
+                self.compile_expr(index)?;
+                self.emit(Op::ArrayGet);
+            }
+
             Expr::Identifier(name) => match self.context.resolve_local(name) {
                 Some(slot) => self.emit(Op::GetLocal(slot)),
                 None => match self.resolve_upvalue(name) {

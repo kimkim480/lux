@@ -10,6 +10,7 @@ pub enum Value {
     Umbra,
     Function(Rc<RefCell<Function>>),
     Closure(Rc<Closure>),
+    Array(Rc<RefCell<Vec<Value>>>),
 }
 
 impl fmt::Display for Value {
@@ -21,6 +22,16 @@ impl fmt::Display for Value {
             Value::Umbra => write!(f, "Umbra"),
             Value::Function(fun) => write!(f, "{}", fun.borrow()),
             Value::Closure(c) => write!(f, "{}", c.function.borrow()),
+            Value::Array(arr) => {
+                write!(f, "[")?;
+                for (i, value) in arr.borrow().iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", value)?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
@@ -56,7 +67,6 @@ pub enum Op {
     GreaterEqual,
     Pop,
     Dup,
-    Print,
     GetGlobal(String),
     SetGlobal(String),
     GetLocal(usize),
@@ -70,6 +80,10 @@ pub enum Op {
     Call(usize),
     JumpIfFalse(usize),
     Jump(usize),
+    MakeArray(usize), // pops N values → pushes array
+    ArrayGet,         // pops index, array → pushes value
+    ArraySet,         // pops index, value, array → sets value
+    Print,
     Return,
 }
 
@@ -103,7 +117,7 @@ impl Chunk {
                     let value = &self.constants[*index];
                     println!("{:<16} {:>6} '{}'", "Constant", index, value);
                 }
-                Op::GetGlobal(name) => println!("{:<21} '{}'", "GetGlobal", name),
+                Op::GetGlobal(name) => println!("{:<23} '{}'", "GetGlobal", name),
                 Op::SetGlobal(name) => println!("{:<21} '{}'", "SetGlobal", name),
                 Op::GetLocal(slot) => {
                     println!("{:<21} {}", "GetLocal", slot)
@@ -137,6 +151,9 @@ impl Chunk {
                     println!("{:<21} {:04} -> {:04}", "Jump", ip, offset)
                 }
                 Op::Call(arity) => println!("{:<21} {}", "Call", arity),
+                Op::MakeArray(arity) => println!("{:<21} {}", "MakeArray", arity),
+                Op::ArrayGet => println!("{:<21}", "ArrayGet"),
+                Op::ArraySet => println!("{:<21}", "ArraySet"),
                 Op::Return => println!("{:<21}", "Return"),
             }
         } else {

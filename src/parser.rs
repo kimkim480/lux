@@ -94,28 +94,38 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn map_binary_op(op: TokenKind) -> BinaryOp {
+    fn map_binary_op(&mut self, op: TokenKind) -> Result<BinaryOp, ParseError> {
         match op {
-            TokenKind::Plus => BinaryOp::Plus,
-            TokenKind::Minus => BinaryOp::Minus,
-            TokenKind::Star => BinaryOp::Star,
-            TokenKind::Slash => BinaryOp::Slash,
-            TokenKind::Percent => BinaryOp::Percent,
-            TokenKind::EqualEqual => BinaryOp::EqualEqual,
-            TokenKind::BangEqual => BinaryOp::BangEqual,
-            TokenKind::Less => BinaryOp::Less,
-            TokenKind::LessEqual => BinaryOp::LessEqual,
-            TokenKind::Greater => BinaryOp::Greater,
-            TokenKind::GreaterEqual => BinaryOp::GreaterEqual,
-            _ => panic!("Invalid binary operator: {:?}", op), // TODO: handle error
+            TokenKind::Plus => Ok(BinaryOp::Plus),
+            TokenKind::Minus => Ok(BinaryOp::Minus),
+            TokenKind::Star => Ok(BinaryOp::Star),
+            TokenKind::Slash => Ok(BinaryOp::Slash),
+            TokenKind::Percent => Ok(BinaryOp::Percent),
+            TokenKind::EqualEqual => Ok(BinaryOp::EqualEqual),
+            TokenKind::BangEqual => Ok(BinaryOp::BangEqual),
+            TokenKind::Less => Ok(BinaryOp::Less),
+            TokenKind::LessEqual => Ok(BinaryOp::LessEqual),
+            TokenKind::Greater => Ok(BinaryOp::Greater),
+            TokenKind::GreaterEqual => Ok(BinaryOp::GreaterEqual),
+            _ => {
+                return Err(ParseError::new(
+                    format!("Invalid binary operator: {:?}", op),
+                    &self.filename,
+                    self.peek(),
+                ));
+            }
         }
     }
 
-    fn map_unary_op(op: TokenKind) -> UnaryOp {
+    fn map_unary_op(&mut self, op: TokenKind) -> Result<UnaryOp, ParseError> {
         match op {
-            TokenKind::Bang => UnaryOp::Bang,
-            TokenKind::Minus => UnaryOp::Minus,
-            _ => panic!("Invalid unary operator: {:?}", op), // TODO: handle error
+            TokenKind::Bang => Ok(UnaryOp::Bang),
+            TokenKind::Minus => Ok(UnaryOp::Minus),
+            _ => Err(ParseError::new(
+                format!("Invalid unary operator: {:?}", op),
+                &self.filename,
+                self.peek(),
+            )),
         }
     }
 
@@ -161,6 +171,44 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
+    fn parse_array_literal(&mut self) -> Result<Expr, ParseError> {
+        let mut elements = Vec::new();
+
+        if !self.match_token(&TokenKind::RightBracket) {
+            loop {
+                let expr = self.parse_expr()?;
+                elements.push(expr);
+
+                if self.match_token(&TokenKind::RightBracket) {
+                    break;
+                }
+
+                self.consume_token(TokenKind::Comma, "Expected ',' between array elements")?;
+            }
+        }
+
+        Ok(Expr::Array { elements })
+    }
+
+    fn parse_index(&mut self, array: Expr) -> Result<Expr, ParseError> {
+        let index = self.parse_expr()?;
+        self.consume_token(TokenKind::RightBracket, "Expected ']' after index")?;
+
+        if self.match_token(&TokenKind::Equal) {
+            let value = self.parse_expr()?;
+            Ok(Expr::AssignIndex {
+                array: Box::new(array),
+                index: Box::new(index),
+                value: Box::new(value),
+            })
+        } else {
+            Ok(Expr::Index {
+                array: Box::new(array),
+                index: Box::new(index),
+            })
+        }
+    }
+
     fn parse_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
         let mut args = Vec::new();
 
@@ -187,7 +235,7 @@ impl<'a> Parser<'a> {
         let right = self.parse_precedence(precedence.next())?;
         Ok(Expr::Binary {
             left: Box::new(left),
-            op: Self::map_binary_op(op),
+            op: Self::map_binary_op(self, op)?,
             right: Box::new(right),
         })
     }
@@ -275,9 +323,7 @@ impl<'a> Parser<'a> {
                 };
 
                 self.consume_token(TokenKind::Colon, "Expected ':' after parameter name")?;
-                let ty = self
-                    .parse_type()
-                    .ok_or_else(|| ParseError::new("Expected type", &self.filename, self.peek()))?;
+                let ty = self.parse_type()?;
 
                 params.push((name, ty));
 
@@ -299,9 +345,7 @@ impl<'a> Parser<'a> {
         self.consume_token(TokenKind::RightParen, "Expected ')' after parameters")?;
 
         let return_type = if self.match_token(&TokenKind::Arrow) {
-            self.parse_type().ok_or_else(|| {
-                ParseError::new("Expected return type", &self.filename, self.peek())
-            })?
+            self.parse_type()?
         } else {
             Type::Umbra
         };
@@ -463,9 +507,7 @@ impl<'a> Parser<'a> {
 
                 self.consume_token(TokenKind::Colon, "Expected ':' after parameter name")?;
 
-                let ty = self
-                    .parse_type()
-                    .ok_or_else(|| ParseError::new("Expected type", &self.filename, self.peek()))?;
+                let ty = self.parse_type()?;
 
                 params.push((ident, ty));
 
@@ -486,9 +528,7 @@ impl<'a> Parser<'a> {
         }
 
         let return_type = if self.match_token(&TokenKind::Arrow) {
-            self.parse_type().ok_or_else(|| {
-                ParseError::new("Expected return type", &self.filename, self.peek())
-            })?
+            self.parse_type()?
         } else {
             Type::Umbra
         };
@@ -525,9 +565,7 @@ impl<'a> Parser<'a> {
             "expected ':' after identifier in const declaration",
         )?;
 
-        let ty = self.parse_type().ok_or_else(|| {
-            ParseError::new("expected type after ':'", &self.filename, self.peek())
-        })?;
+        let ty = self.parse_type()?;
 
         self.consume_token(
             TokenKind::Equal,
@@ -561,9 +599,7 @@ impl<'a> Parser<'a> {
             "expected ':' after identifier in let declaration",
         )?;
 
-        let ty = self.parse_type().ok_or_else(|| {
-            ParseError::new("Expected type after ':'", &self.filename, self.peek())
-        })?;
+        let ty = self.parse_type()?;
 
         self.consume_token(
             TokenKind::Equal,
@@ -637,7 +673,7 @@ impl<'a> Parser<'a> {
         let op = self.previous.kind.clone();
         let right = self.parse_precedence(Precedence::Unary)?;
         Ok(Expr::Unary {
-            op: Self::map_unary_op(op),
+            op: Self::map_unary_op(self, op)?,
             expr: Box::new(right),
         })
     }
@@ -646,7 +682,13 @@ impl<'a> Parser<'a> {
         let op = match self.previous.kind {
             TokenKind::AndAnd => LogicalOp::AndAnd,
             TokenKind::OrOr => LogicalOp::OrOr,
-            _ => unreachable!(), // TODO: handle error
+            _ => {
+                return Err(ParseError::new(
+                    format!("Invalid logical operator: {:?}", self.previous.kind),
+                    &self.filename,
+                    self.peek(),
+                ));
+            }
         };
 
         let right = self.parse_precedence(Precedence::And)?;
@@ -722,18 +764,29 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Continue)
     }
 
-    fn parse_type(&mut self) -> Option<Type> {
+    fn parse_type(&mut self) -> Result<Type, ParseError> {
         let token = self.peek().clone();
         self.advance();
         match &token.kind {
-            TokenKind::Light => Some(Type::Light),
-            TokenKind::Lumens => Some(Type::Lumens),
-            TokenKind::Umbra => Some(Type::Umbra),
-            TokenKind::Photon => Some(Type::Photon),
-            TokenKind::Lambda => Some(Type::Lambda),
-            TokenKind::Identifier(name) => Some(Type::Custom(name.clone())),
-            _ => None,
+            TokenKind::Light => Ok(Type::Light),
+            TokenKind::Lumens => Ok(Type::Lumens),
+            TokenKind::Umbra => Ok(Type::Umbra),
+            TokenKind::Photon => Ok(Type::Photon),
+            TokenKind::Lambda => Ok(Type::Lambda),
+            TokenKind::LeftBracket => self.parse_array_type(),
+            TokenKind::Identifier(name) => Ok(Type::Custom(name.clone())),
+            _ => Err(ParseError::new(
+                format!("Invalid type: {:?}", token.kind),
+                &self.filename,
+                self.peek(),
+            )),
         }
+    }
+
+    fn parse_array_type(&mut self) -> Result<Type, ParseError> {
+        let element_type = self.parse_type()?;
+        self.consume_token(TokenKind::RightBracket, "Expected ']' after array type")?;
+        Ok(Type::Array(Box::new(element_type)))
     }
 
     fn peek(&self) -> &Token {
@@ -816,6 +869,11 @@ impl<'a> Parser<'a> {
             LeftParen => ParseRule {
                 prefix: Some(Parser::parse_grouping),
                 infix: Some(Parser::parse_call),
+                precedence: Precedence::Call,
+            },
+            LeftBracket => ParseRule {
+                prefix: Some(Parser::parse_array_literal),
+                infix: Some(Parser::parse_index),
                 precedence: Precedence::Call,
             },
             True | False | Umbra => ParseRule {
