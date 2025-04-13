@@ -1,6 +1,9 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
+
+use crate::ast::Type;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -11,6 +14,10 @@ pub enum Value {
     Function(Rc<RefCell<Function>>),
     Closure(Rc<Closure>),
     Array(Rc<RefCell<Vec<Value>>>),
+    Facet {
+        type_name: String,
+        fields: HashMap<String, Value>,
+    },
 }
 
 impl fmt::Display for Value {
@@ -31,6 +38,16 @@ impl fmt::Display for Value {
                     write!(f, "{}", value)?;
                 }
                 write!(f, "]")
+            }
+            Value::Facet { type_name, fields } => {
+                write!(f, "{} {{", type_name)?;
+                for (i, (name, value)) in fields.iter().enumerate() {
+                    write!(f, "{}: {}", name, value)?;
+                    if i < fields.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "}}")
             }
         }
     }
@@ -85,6 +102,11 @@ pub enum Op {
     ArraySet,         // pops index, value, array → sets value
     Print,
     Return,
+    MakeFacet {
+        type_name: String,
+        field_count: usize,
+    },
+    FieldGet(String),
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +177,14 @@ impl Chunk {
                 Op::ArrayGet => println!("{:<21}", "ArrayGet"),
                 Op::ArraySet => println!("{:<21}", "ArraySet"),
                 Op::Return => println!("{:<21}", "Return"),
+                Op::MakeFacet {
+                    type_name,
+                    field_count,
+                } => {
+                    println!("{:<21} {}", "MakeFacet", type_name);
+                    println!("{:<21} {}", "MakeFacet", field_count);
+                }
+                Op::FieldGet(field) => println!("{:<21} {}", "FieldGet", field),
             }
         } else {
             println!("(invalid ip)");
@@ -193,4 +223,10 @@ pub struct Closure {
 pub enum Upvalue {
     Open(usize),
     Closed(Value),
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeDef {
+    Facet { fields: Vec<(String, Type)> },
+    Alias(Type),
 }

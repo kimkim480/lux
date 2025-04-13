@@ -1,18 +1,17 @@
 // skip
-constellation main;
+constellation main
+
+Refraction Point = Facet {
+  x Light
+  y Light
+}
+
+Refraction Number = Light;
 
 fn Prism() {
-  let xs: [Light] = [1, 2];
+  let p: Point = Point { x: 1, y: 2 };
 
-  fn map(arr: [T], callback: Lambda) {
-    for(let i: Light = 0; i < 2; i += 1) {
-      
-      let temp: Light = callback(arr[i]);
-      arr[i] = temp;
-    }
-  }
-
-  emit xs; 
-  map(xs, fn(x: Light) { return x * 2; }); 
-  emit xs;
+  emit p;
+  emit p.x;
+  emit p.y;
 }

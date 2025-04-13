@@ -1,4 +1,4 @@
-constellation main;
+constellation main
 
 fn A() {
   emit "A"; 

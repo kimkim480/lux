@@ -1,0 +1,27 @@
+// skip
+constellation face_tests
+
+Refraction Point = Facet {
+  x Light
+  y Light
+}
+
+const p: Point = Point { x: 3, y: 4 };
+
+fn Prism() {
+  emit "--- facet literal ---";
+  emit p;         // test: <Point {x: 3, y: 4}>
+  emit p.x;       // test: <3>
+  emit p.y;       // test: <4>
+
+  emit "--- field access and math ---";
+  let doubleX: Light = p.x * 2;
+  emit doubleX;    // test: <6>
+
+  emit "--- facet inside function ---";
+  show(p);
+}
+
+fn show(pt: Point) {
+  emit pt.x + pt.y; // test: <7>
+}

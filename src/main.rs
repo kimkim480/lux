@@ -11,7 +11,7 @@ mod value;
 use compiler::Compiler;
 use prism::Prism;
 use std::{env, fs};
-use value::CallFrame;
+use value::{CallFrame, TypeDef};
 
 fn main() {
     if let Err(err) = try_main() {
@@ -34,6 +34,21 @@ fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut prism = Prism::new();
     prism.debug_trace = debug;
     prism.globals = compiler.borrow().globals.clone();
+    prism.facet_layouts = compiler
+        .borrow()
+        .type_defs
+        .iter()
+        .filter_map(|(name, def)| {
+            if let TypeDef::Facet { fields } = def {
+                Some((
+                    name.clone(),
+                    fields.iter().map(|(f, _)| f.clone()).collect(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
 
     prism.frames.push(CallFrame {
         function: _start.clone(),

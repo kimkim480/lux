@@ -1,4 +1,4 @@
-constellation main;
+constellation main
 
 fn no_return() -> Umbra {
   emit "no return";         

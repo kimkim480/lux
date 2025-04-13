@@ -1,10 +1,7 @@
-constellation array;
+constellation array
 
-const global: [Light] = [10, 20, 30];
 
 fn Prism() {
-  global[2] = 3;
-  emit global;
   emit "create + get"; // test: <create + get>
   let xs: [Light] = [10, 20, 30];
   emit xs[0]; // test: <10>

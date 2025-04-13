@@ -1,4 +1,4 @@
-constellation shadow;
+constellation shadow
 
 fn Prism() {
   fn bula(x: Light) -> Light {

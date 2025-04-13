@@ -179,7 +179,7 @@ impl<'a> Lexer<'a> {
             "Lumens" => TokenKind::Lumens,
             "Photon" => TokenKind::Photon,
             "Refraction" => TokenKind::Refraction,
-            "facet" => TokenKind::Facet,
+            "Facet" => TokenKind::Facet,
             "interface" => TokenKind::Interface,
             "import" => TokenKind::Import,
             "as" => TokenKind::As,

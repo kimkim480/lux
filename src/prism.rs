@@ -11,6 +11,7 @@ pub struct Prism {
     pub stack: Vec<Value>,
     pub globals: HashMap<String, Value>,
     pub debug_trace: bool,
+    pub facet_layouts: HashMap<String, Vec<String>>,
 }
 
 impl Prism {
@@ -20,6 +21,7 @@ impl Prism {
             stack: Vec::new(),
             globals: HashMap::new(),
             debug_trace: false,
+            facet_layouts: HashMap::new(),
         }
     }
 
@@ -385,10 +387,6 @@ impl Prism {
                     let index_val = self.pop()?;
                     let array_val = self.pop()?;
 
-                    println!("value: {:?}", value);
-                    println!("index_val: {:?}", index_val);
-                    println!("array_val: {:?}", array_val);
-
                     let index = match index_val {
                         Value::Light(n) if n.fract() == 0.0 => n as usize,
                         _ => return Err(PrismError::Runtime("Invalid array index".into())),
@@ -408,6 +406,54 @@ impl Prism {
                         _ => {
                             return Err(PrismError::Runtime(
                                 "Tried to index non-array value".into(),
+                            ));
+                        }
+                    }
+                }
+
+                Op::MakeFacet {
+                    type_name,
+                    field_count,
+                } => {
+                    if self.stack.len() < field_count {
+                        return Err(PrismError::Runtime(format!(
+                            "Not enough values to construct facet '{}'",
+                            type_name
+                        )));
+                    }
+
+                    let layout = self.facet_layouts.get(&type_name).ok_or_else(|| {
+                        PrismError::Runtime(format!("Unknown facet type '{}'", type_name))
+                    })?;
+
+                    let values = self.stack.split_off(self.stack.len() - layout.len());
+
+                    let mut fields = HashMap::new();
+                    for (name, value) in layout.iter().zip(values) {
+                        fields.insert(name.clone(), value);
+                    }
+
+                    let facet = Value::Facet {
+                        type_name: type_name.clone(),
+                        fields,
+                    };
+
+                    self.push(facet)?;
+                }
+
+                Op::FieldGet(name) => {
+                    let value = self.pop()?;
+
+                    match value {
+                        Value::Facet { fields, .. } => {
+                            let val = fields.get(&name).ok_or_else(|| {
+                                PrismError::Runtime(format!("Field '{}' not found", name))
+                            })?;
+                            self.push(val.clone())?;
+                        }
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Tried to access field on non-facet value".into(),
                             ));
                         }
                     }

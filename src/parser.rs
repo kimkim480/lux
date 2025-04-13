@@ -229,6 +229,15 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_field_access(&mut self, object: Expr) -> Result<Expr, ParseError> {
+        let field = self.consume_identifier("Expected field name after '.'")?;
+
+        Ok(Expr::FieldGet {
+            object: Box::new(object),
+            field,
+        })
+    }
+
     fn parse_binary(&mut self, left: Expr) -> Result<Expr, ParseError> {
         let op = self.previous.kind.clone();
         let precedence = self.get_rule(&op).precedence;
@@ -282,8 +291,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_identifier(&mut self) -> Result<Expr, ParseError> {
-        if let TokenKind::Identifier(name) = self.previous.kind.clone() {
-            Ok(Expr::Identifier(name))
+        let token = self.previous.clone();
+        if let TokenKind::Identifier(name) = token.kind {
+            if self.match_token(&TokenKind::LeftBrace) {
+                Ok(self.parse_facet_literal(name)?)
+            } else {
+                Ok(Expr::Identifier(name))
+            }
         } else {
             Err(ParseError::new(
                 "Expected identifier",
@@ -582,18 +596,8 @@ impl<'a> Parser<'a> {
     fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         self.advance(); // consume let
 
-        let name = match &self.peek().kind {
-            TokenKind::Identifier(name) => name.clone(),
-            _ => {
-                return Err(ParseError::new(
-                    "expected identifier in let declaration",
-                    &self.filename,
-                    self.peek(),
-                ));
-            }
-        };
+        let name = self.consume_identifier("expected identifier in let declaration")?;
 
-        self.advance(); // consume identifier
         self.consume_token(
             TokenKind::Colon,
             "expected ':' after identifier in let declaration",
@@ -615,6 +619,63 @@ impl<'a> Parser<'a> {
         }
 
         Ok(Stmt::LetDecl { name, ty, value })
+    }
+
+    fn parse_refraction_decl(&mut self) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'Refraction'
+
+        let name = self.consume_identifier("Expected type name after 'Refraction'")?;
+
+        self.consume_token(TokenKind::Equal, "Expected '=' after type name")?;
+
+        match self.peek().kind {
+            TokenKind::Facet => self.parse_facet_body(name),
+            _ => {
+                // Assume type alias
+                let alias_type = self.parse_type()?;
+
+                self.consume_token(TokenKind::Semicolon, "Expected ';' after type alias")?;
+
+                Ok(Stmt::TypeAlias {
+                    name,
+                    aliased: alias_type,
+                })
+            }
+        }
+    }
+
+    fn parse_facet_body(&mut self, name: String) -> Result<Stmt, ParseError> {
+        self.advance(); // consume 'Facet'
+        self.consume_token(TokenKind::LeftBrace, "Expected '{' after 'Facet'")?;
+
+        let mut fields = Vec::new();
+
+        while self.peek().kind != TokenKind::RightBrace {
+            let field_name = self.consume_identifier("Expected field name")?;
+            let field_type = self.parse_type()?;
+            fields.push((field_name, field_type));
+        }
+
+        self.consume_token(TokenKind::RightBrace, "Expected '}' after facet body")?;
+
+        Ok(Stmt::FacetDecl { name, fields })
+    }
+
+    fn parse_facet_literal(&mut self, type_name: String) -> Result<Expr, ParseError> {
+        let mut fields = Vec::new();
+
+        while self.peek().kind != TokenKind::RightBrace {
+            let field_name = self.consume_identifier("Expected field name")?;
+            self.consume_token(TokenKind::Colon, "Expected ':' after field name")?;
+            let expr = self.parse_expr()?;
+            fields.push((field_name, expr));
+
+            self.match_token(&TokenKind::Comma); // optional comma
+        }
+
+        self.consume_token(TokenKind::RightBrace, "Expected '}' after facet literal")?;
+
+        Ok(Expr::FacetInit { type_name, fields })
     }
 
     fn parse_literal(&mut self) -> Result<Expr, ParseError> {
@@ -704,6 +765,7 @@ impl<'a> Parser<'a> {
             TokenKind::Constellation => self.parse_constellation(),
             TokenKind::Const => self.parse_const(),
             TokenKind::Let => self.parse_let(),
+            TokenKind::Refraction => self.parse_refraction_decl(),
             TokenKind::Fn => self.parse_fn(),
             TokenKind::If => self.parse_if(),
             TokenKind::For => self.parse_for(),
@@ -730,11 +792,6 @@ impl<'a> Parser<'a> {
         };
 
         self.advance(); // consume identifier
-
-        self.consume_token(
-            TokenKind::Semicolon,
-            "Expected ';' after constellation declaration",
-        )?;
 
         Ok(Stmt::ConstellationDecl(name))
     }
@@ -791,6 +848,16 @@ impl<'a> Parser<'a> {
 
     fn peek(&self) -> &Token {
         &self.current
+    }
+
+    fn consume_identifier(&mut self, message: &str) -> Result<String, ParseError> {
+        let token = self.peek().clone();
+        self.advance();
+        if let TokenKind::Identifier(name) = &token.kind {
+            Ok(name.clone())
+        } else {
+            Err(ParseError::new(message, &self.filename, &token))
+        }
     }
 
     fn get_rule(&self, kind: &TokenKind) -> ParseRule<'a> {
@@ -895,6 +962,11 @@ impl<'a> Parser<'a> {
                 prefix: None,
                 infix: Some(Parser::parse_assignment),
                 precedence: Precedence::Assignment,
+            },
+            Dot => ParseRule {
+                prefix: None,
+                infix: Some(Parser::parse_field_access),
+                precedence: Precedence::Call,
             },
             Fn => ParseRule {
                 prefix: Some(Parser::parse_lambda),

@@ -1,4 +1,4 @@
-constellation main;
+constellation main
 
 const msg: Lumens = "Global";
 

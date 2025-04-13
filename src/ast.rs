@@ -120,6 +120,14 @@ pub enum Expr {
         index: Box<Expr>,
         value: Box<Expr>,
     },
+    FacetInit {
+        type_name: String,
+        fields: Vec<(String, Expr)>,
+    },
+    FieldGet {
+        object: Box<Expr>,
+        field: String,
+    },
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
@@ -139,6 +147,14 @@ pub enum Stmt {
         name: String,
         ty: Type,
         value: Expr,
+    },
+    FacetDecl {
+        name: String,
+        fields: Vec<(String, Type)>,
+    },
+    TypeAlias {
+        name: String,
+        aliased: Type,
     },
     If {
         condition: Expr,

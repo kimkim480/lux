@@ -1,5 +1,5 @@
 // skip
-constellation Switch;
+constellation Switch
 
 fn Prism() {
   emit "--- numbers ---";

@@ -5,7 +5,7 @@ use crate::{
     error::{ParseError, PrismError, PrismResult},
     lexer::Lexer,
     parser::Parser,
-    value::{Chunk, Function, Op, Value},
+    value::{Chunk, Function, Op, TypeDef, Value},
 };
 
 #[derive(Clone, Debug)]
@@ -23,6 +23,7 @@ pub struct Compiler {
     pub context: CompilerContext,
     pub enclosing: Option<Rc<RefCell<Compiler>>>,
     loop_stack: Vec<LoopContext>,
+    pub type_defs: HashMap<String, TypeDef>,
 }
 
 impl Compiler {
@@ -56,6 +57,7 @@ impl Compiler {
             context,
             enclosing: None,
             loop_stack: Vec::new(),
+            type_defs: HashMap::new(),
         })))
     }
 
@@ -88,6 +90,8 @@ impl Compiler {
 
     fn compile_stmt(&mut self, stmt: &Stmt) -> Result<(), PrismError> {
         match stmt {
+            Stmt::ConstellationDecl(name) => {}
+
             Stmt::LetDecl { name, value, .. } => {
                 if self.context.is_global_scope {
                     return Err(PrismError::Compile(
@@ -111,6 +115,7 @@ impl Compiler {
                 let slot = self.context.declare_local(name);
                 self.emit(Op::SetLocal(slot));
             }
+
             Stmt::ConstDecl { name, value, .. } => {
                 if !self.context.is_global_scope {
                     return Err(PrismError::Compile(
@@ -128,13 +133,44 @@ impl Compiler {
                 Self::compile_expr(self, value)?;
                 self.emit(Op::SetGlobal(name.clone()));
             }
+
+            Stmt::FacetDecl { name, fields } => {
+                if self.type_defs.contains_key(name) {
+                    return Err(PrismError::Compile(format!(
+                        "Type '{}' already defined",
+                        name
+                    )));
+                }
+
+                self.type_defs.insert(
+                    name.clone(),
+                    TypeDef::Facet {
+                        fields: fields.clone(),
+                    },
+                );
+            }
+
+            Stmt::TypeAlias { name, aliased } => {
+                if self.type_defs.contains_key(name) {
+                    return Err(PrismError::Compile(format!(
+                        "Type '{}' already defined",
+                        name
+                    )));
+                }
+
+                self.type_defs
+                    .insert(name.clone(), TypeDef::Alias(aliased.clone()));
+            }
+
             Stmt::Expr(expr) => {
                 Self::compile_expr(self, expr)?;
             }
+
             Stmt::Emit(expr) => {
                 Self::compile_expr(self, expr)?;
                 self.emit(Op::Print);
             }
+
             Stmt::FnDecl {
                 name,
                 arity,
@@ -174,6 +210,7 @@ impl Compiler {
                     },
                     enclosing: Some(parent),
                     loop_stack: Vec::new(),
+                    type_defs: self.type_defs.clone(),
                 }));
 
                 for (param_name, _) in params.iter() {
@@ -209,6 +246,7 @@ impl Compiler {
                     self.emit(Op::SetLocal(slot));
                 }
             }
+
             Stmt::For {
                 init,
                 condition,
@@ -342,6 +380,7 @@ impl Compiler {
                 let after = self.current_ip();
                 self.emit_at(Op::Jump(after), jump_pos);
             }
+
             Stmt::Break => {
                 if let Some(ctx) = self.loop_stack.last() {
                     let jump_pos = self.current_ip();
@@ -383,7 +422,6 @@ impl Compiler {
 
                 self.emit(Op::Return);
             }
-            _ => {}
         }
 
         Ok(())
@@ -391,6 +429,41 @@ impl Compiler {
 
     fn compile_expr(&mut self, expr: &Expr) -> Result<(), PrismError> {
         match expr {
+            Expr::FacetInit { type_name, fields } => {
+                // 1. Check that the type exists
+                let expected_fields = match self.type_defs.get(type_name) {
+                    Some(TypeDef::Facet { fields }) => fields.clone(),
+                    _ => {
+                        return Err(PrismError::Compile(format!(
+                            "Type '{}' not found or not a Facet",
+                            type_name
+                        )));
+                    }
+                };
+
+                // 2. Compile the field expressions in the declared order
+                for (decl_name, _) in &expected_fields {
+                    let Some((_, expr)) = fields.iter().find(|(n, _)| n == decl_name) else {
+                        return Err(PrismError::Compile(format!(
+                            "Missing field '{}' in '{}'",
+                            decl_name, type_name
+                        )));
+                    };
+                    self.compile_expr(expr)?;
+                }
+
+                // 3. Emit an Op to construct the facet
+                self.emit(Op::MakeFacet {
+                    type_name: type_name.clone(),
+                    field_count: expected_fields.len(),
+                });
+            }
+
+            Expr::FieldGet { object, field } => {
+                self.compile_expr(object)?;
+                self.emit(Op::FieldGet(field.clone()));
+            }
+
             Expr::Array { elements } => {
                 for element in elements {
                     self.compile_expr(element)?;
@@ -608,6 +681,7 @@ impl Compiler {
                     },
                     enclosing: Some(parent),
                     loop_stack: vec![],
+                    type_defs: self.type_defs.clone(),
                 }));
 
                 for (param_name, _) in params.iter() {

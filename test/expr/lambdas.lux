@@ -1,5 +1,5 @@
 // skip
-constellation main;
+constellation main
 
 fn Prism() {
   let f: Lambda = fn() {
@@ -14,7 +14,7 @@ fn Prism() {
 }
 
 fn test_closure() {
-  let msg: Lumens = "Lux";
+  let msg: [Lumens] = "Lux";
   let shout: Lambda = fn() {
     emit msg; // test: <Lux>
   };
