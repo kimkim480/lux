@@ -96,11 +96,11 @@ fn forever() {
 // use continue
 fn use_continue() {
   for (let i: Light = 0; i < 4; i = i + 1) {
-    if i == 2 {
+    if (i == 2) {
       continue;
     }
     emit i; // test: <0> <1> <3>
-    if i == 3 {
+    if (i == 3) {
       break;
     }
   }

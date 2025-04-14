@@ -1,7 +1,7 @@
 // skip
 constellation face_tests
 
-Refraction Point = Facet {
+Refraction Point Facet {
   x Light
   y Light
 }

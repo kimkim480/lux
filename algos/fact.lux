@@ -1,7 +1,7 @@
-constellation main;
+constellation main
 
 fn fact(n: Light) -> Light {
-  if n <= 1 {
+  if (n <= 1) {
     return 1;
   } else {
     return n * fact(n - 1);

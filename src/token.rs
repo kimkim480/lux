@@ -68,7 +68,7 @@ pub enum TokenKind {
     Light,
     Lumens,
     Photon,
-    Lambda,
+    Function,
 
     // Native functions
     Emit,

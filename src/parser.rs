@@ -1,11 +1,11 @@
-use crate::ast::{BinaryOp, Expr, LogicalOp, Precedence, Stmt, Type, UnaryOp};
+use crate::ast::{BinaryOp, Expr, LogicalOp, Precedence, Span, Spanned, Stmt, Type, UnaryOp};
 use crate::constants;
 use crate::error::ParseError;
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenKind};
 
-type PrefixParseFn<'a> = fn(&mut Parser<'a>) -> Result<Expr, ParseError>;
-type InfixParseFn<'a> = fn(&mut Parser<'a>, Expr) -> Result<Expr, ParseError>;
+type PrefixParseFn<'a> = fn(&mut Parser<'a>) -> Result<Spanned<Expr>, ParseError>;
+type InfixParseFn<'a> = fn(&mut Parser<'a>, Spanned<Expr>) -> Result<Spanned<Expr>, ParseError>;
 
 struct ParseRule<'a> {
     prefix: Option<PrefixParseFn<'a>>,
@@ -31,7 +31,7 @@ impl<'a> Parser<'a> {
             current: first.clone(),
         }
     }
-    pub fn parse(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    pub fn parse(&mut self) -> Result<Vec<Spanned<Stmt>>, ParseError> {
         let mut stmts = Vec::new();
 
         while !self.is_at_end() {
@@ -133,46 +133,64 @@ impl<'a> Parser<'a> {
         matches!(self.peek().kind, TokenKind::Eof)
     }
 
-    fn parse_binary_expr(&mut self) -> Result<Expr, ParseError> {
+    fn parse_binary_expr(&mut self) -> Result<Spanned<Expr>, ParseError> {
         let mut left = self.parse_expr()?;
 
         while let Some(op) = self.match_binary_op() {
             let right = self.parse_expr()?;
-            left = Expr::Binary {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            };
+            let span_start = left.span.clone();
+            left = Spanned::new(
+                Expr::Binary {
+                    left: Box::new(left),
+                    op,
+                    right: Box::new(right),
+                },
+                span_start,
+            );
         }
 
         Ok(left)
     }
 
-    fn parse_emit(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_emit(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume emit
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         let expr = self.parse_expr()?;
         self.consume_token(TokenKind::Semicolon, "Expected ';' after emit")?;
-        Ok(Stmt::Emit(expr))
+        Ok(Spanned::new(Stmt::Emit(expr), span))
     }
 
-    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expr(&mut self) -> Result<Spanned<Expr>, ParseError> {
         self.parse_precedence(Precedence::Assignment)
     }
 
-    fn parse_expr_stmt(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_expr_stmt(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         let expr = self.parse_expr()?;
+        let span = expr.span.clone();
         self.consume_token(TokenKind::Semicolon, "Expected ';' after expression")?;
-        Ok(Stmt::Expr(expr))
+        Ok(Spanned::new(Stmt::Expr(expr), span))
     }
 
-    fn parse_grouping(&mut self) -> Result<Expr, ParseError> {
+    fn parse_grouping(&mut self) -> Result<Spanned<Expr>, ParseError> {
         let expr = self.parse_expr()?;
         self.consume_token(TokenKind::RightParen, "Expected ')' after expression")?;
         Ok(expr)
     }
 
-    fn parse_array_literal(&mut self) -> Result<Expr, ParseError> {
+    fn parse_array_literal(&mut self) -> Result<Spanned<Expr>, ParseError> {
         let mut elements = Vec::new();
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
 
         if !self.match_token(&TokenKind::RightBracket) {
             loop {
@@ -187,29 +205,36 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(Expr::Array { elements })
+        Ok(Spanned::new(Expr::Array { elements }, span))
     }
 
-    fn parse_index(&mut self, array: Expr) -> Result<Expr, ParseError> {
+    fn parse_index(&mut self, array: Spanned<Expr>) -> Result<Spanned<Expr>, ParseError> {
         let index = self.parse_expr()?;
+        let span_start = index.span.clone();
         self.consume_token(TokenKind::RightBracket, "Expected ']' after index")?;
 
         if self.match_token(&TokenKind::Equal) {
             let value = self.parse_expr()?;
-            Ok(Expr::AssignIndex {
-                array: Box::new(array),
-                index: Box::new(index),
-                value: Box::new(value),
-            })
+            Ok(Spanned::new(
+                Expr::AssignIndex {
+                    array: Box::new(array),
+                    index: Box::new(index),
+                    value: Box::new(value),
+                },
+                span_start,
+            ))
         } else {
-            Ok(Expr::Index {
-                array: Box::new(array),
-                index: Box::new(index),
-            })
+            Ok(Spanned::new(
+                Expr::ArrayGet {
+                    array: Box::new(array),
+                    index: Box::new(index),
+                },
+                span_start,
+            ))
         }
     }
 
-    fn parse_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
+    fn parse_call(&mut self, callee: Spanned<Expr>) -> Result<Spanned<Expr>, ParseError> {
         let mut args = Vec::new();
 
         if !self.match_token(&TokenKind::RightParen) {
@@ -223,37 +248,53 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(Expr::Call {
-            callee: Box::new(callee),
-            args,
-        })
+        let span_start = callee.span.clone();
+        Ok(Spanned::new(
+            Expr::Call {
+                callee: Box::new(callee),
+                args,
+            },
+            span_start,
+        ))
     }
 
-    fn parse_field_access(&mut self, object: Expr) -> Result<Expr, ParseError> {
+    fn parse_field_access(&mut self, object: Spanned<Expr>) -> Result<Spanned<Expr>, ParseError> {
         let field = self.consume_identifier("Expected field name after '.'")?;
 
-        Ok(Expr::FieldGet {
-            object: Box::new(object),
-            field,
-        })
+        let span_start = object.span.clone();
+        Ok(Spanned::new(
+            Expr::FieldGet {
+                object: Box::new(object),
+                field,
+            },
+            span_start,
+        ))
     }
 
-    fn parse_binary(&mut self, left: Expr) -> Result<Expr, ParseError> {
+    fn parse_binary(&mut self, left: Spanned<Expr>) -> Result<Spanned<Expr>, ParseError> {
         let op = self.previous.kind.clone();
         let precedence = self.get_rule(&op).precedence;
         let right = self.parse_precedence(precedence.next())?;
-        Ok(Expr::Binary {
-            left: Box::new(left),
-            op: Self::map_binary_op(self, op)?,
-            right: Box::new(right),
-        })
+        let span_start = left.span.clone();
+        Ok(Spanned::new(
+            Expr::Binary {
+                left: Box::new(left),
+                op: Self::map_binary_op(self, op)?,
+                right: Box::new(right),
+            },
+            span_start,
+        ))
     }
 
-    fn parse_arithmetic_assignment(&mut self, left: Expr) -> Result<Expr, ParseError> {
+    fn parse_arithmetic_assignment(
+        &mut self,
+        left: Spanned<Expr>,
+    ) -> Result<Spanned<Expr>, ParseError> {
         let op = self.previous.kind.clone();
         let value = self.parse_precedence(Precedence::Assignment)?;
+        let span_start = left.span.clone();
 
-        match left {
+        match left.node {
             Expr::Identifier(name) => {
                 let op = match op {
                     TokenKind::PlusEqual => BinaryOp::Plus,
@@ -264,11 +305,14 @@ impl<'a> Parser<'a> {
                     _ => unreachable!(),
                 };
 
-                Ok(Expr::AssignOp {
-                    name,
-                    op,
-                    value: Box::new(value),
-                })
+                Ok(Spanned::new(
+                    Expr::AssignOp {
+                        name,
+                        op,
+                        value: Box::new(value),
+                    },
+                    span_start,
+                ))
             }
             _ => Err(ParseError::new(
                 "Invalid assignment target",
@@ -278,9 +322,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_number(&mut self) -> Result<Expr, ParseError> {
+    fn parse_number(&mut self) -> Result<Spanned<Expr>, ParseError> {
+        let span_start = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         if let TokenKind::Number(n) = self.previous.kind {
-            Ok(Expr::Number(n))
+            Ok(Spanned::new(Expr::Number(n), span_start))
         } else {
             Err(ParseError::new(
                 "Expected number",
@@ -290,13 +340,19 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_identifier(&mut self) -> Result<Expr, ParseError> {
+    fn parse_identifier(&mut self) -> Result<Spanned<Expr>, ParseError> {
         let token = self.previous.clone();
+        let span_start = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         if let TokenKind::Identifier(name) = token.kind {
             if self.match_token(&TokenKind::LeftBrace) {
                 Ok(self.parse_facet_literal(name)?)
             } else {
-                Ok(Expr::Identifier(name))
+                Ok(Spanned::new(Expr::Identifier(name), span_start))
             }
         } else {
             Err(ParseError::new(
@@ -307,14 +363,18 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_assignment(&mut self, left: Expr) -> Result<Expr, ParseError> {
+    fn parse_assignment(&mut self, left: Spanned<Expr>) -> Result<Spanned<Expr>, ParseError> {
         let value = self.parse_precedence(Precedence::Assignment)?;
+        let span_start = left.span.clone();
 
-        match left {
-            Expr::Identifier(name) => Ok(Expr::Assign {
-                name,
-                value: Box::new(value),
-            }),
+        match left.node {
+            Expr::Identifier(name) => Ok(Spanned::new(
+                Expr::Assign {
+                    name,
+                    value: Box::new(value),
+                },
+                span_start,
+            )),
             _ => Err(ParseError::new(
                 "Invalid assignment target",
                 &self.filename,
@@ -323,15 +383,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_lambda(&mut self) -> Result<Expr, ParseError> {
+    fn parse_lambda(&mut self) -> Result<Spanned<Expr>, ParseError> {
         self.consume_token(TokenKind::LeftParen, "Expected '(' after 'fn'")?;
+
+        let span_start = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
 
         let mut params = Vec::new();
         if self.peek().kind != TokenKind::RightParen {
             loop {
                 self.advance();
                 let name_expr = self.parse_identifier()?;
-                let name = match name_expr {
+                let name = match name_expr.node {
                     Expr::Identifier(name) => name,
                     _ => unreachable!(),
                 };
@@ -368,15 +434,18 @@ impl<'a> Parser<'a> {
 
         let body = self.parse_block()?;
 
-        Ok(Expr::Lambda {
-            arity,
-            params,
-            body,
-            return_type,
-        })
+        Ok(Spanned::new(
+            Expr::Lambda {
+                arity,
+                params,
+                body,
+                return_type,
+            },
+            span_start,
+        ))
     }
 
-    fn parse_block(&mut self) -> Result<Vec<Stmt>, ParseError> {
+    fn parse_block(&mut self) -> Result<Vec<Spanned<Stmt>>, ParseError> {
         let mut stmts = Vec::new();
         while !self.match_token(&TokenKind::RightBrace) {
             let stmt = self.parse_statement()?;
@@ -385,8 +454,14 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
-    fn parse_for(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_for(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume for
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
 
         self.consume_token(TokenKind::LeftParen, "Expected '(' after 'for'")?;
 
@@ -420,18 +495,34 @@ impl<'a> Parser<'a> {
 
         let body = self.parse_block()?;
 
-        Ok(Stmt::For {
-            init,
-            condition,
-            post,
-            body,
-        })
+        Ok(Spanned::new(
+            Stmt::For {
+                init,
+                condition,
+                post,
+                body,
+            },
+            span,
+        ))
     }
 
-    fn parse_switch(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_switch(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume 'switch'
 
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
+        self.consume_token(TokenKind::LeftParen, "Expected '(' after 'switch'")?;
+
         let target = self.parse_expr()?;
+
+        self.consume_token(
+            TokenKind::RightParen,
+            "Expected ')' after switch expression",
+        )?;
         self.consume_token(TokenKind::LeftBrace, "Expected '{' after switch expression")?;
 
         let mut cases = Vec::new();
@@ -455,17 +546,28 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(Stmt::Switch {
-            target,
-            cases,
-            default,
-        })
+        Ok(Spanned::new(
+            Stmt::Switch {
+                target,
+                cases,
+                default,
+            },
+            span,
+        ))
     }
 
-    fn parse_if(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_if(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume if
 
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
+        self.consume_token(TokenKind::LeftParen, "Expected '(' after 'if'")?;
         let condition = self.parse_expr()?;
+        self.consume_token(TokenKind::RightParen, "Expected ')' after if condition")?;
         self.consume_token(TokenKind::LeftBrace, "Expected '{' after if condition")?;
 
         let body = self.parse_block()?;
@@ -482,15 +584,24 @@ impl<'a> Parser<'a> {
             None
         };
 
-        Ok(Stmt::If {
-            condition,
-            body,
-            else_body,
-        })
+        Ok(Spanned::new(
+            Stmt::If {
+                condition,
+                body,
+                else_body,
+            },
+            span,
+        ))
     }
 
-    fn parse_fn(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_fn(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume fn
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
 
         let name = match &self.advance().kind {
             TokenKind::Identifier(name) => name.clone(),
@@ -549,19 +660,29 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenKind::LeftBrace, "Expect '{' before function body.")?;
 
-        let body = self.parse_block()?; // returns Vec<Stmt>
+        let body = self.parse_block()?;
 
-        Ok(Stmt::FnDecl {
-            name,
-            params,
-            arity,
-            body,
-            return_type,
-        })
+        Ok(Spanned::new(
+            Stmt::FnDecl {
+                name,
+                params,
+                arity,
+                body,
+                return_type,
+            },
+            span,
+        ))
     }
 
-    fn parse_const(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_const(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume const
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
             _ => {
@@ -590,11 +711,17 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenKind::Semicolon, "expected ';' after const declaration")?;
 
-        Ok(Stmt::ConstDecl { name, ty, value })
+        Ok(Spanned::new(Stmt::ConstDecl { name, ty, value }, span))
     }
 
-    fn parse_let(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_let(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume let
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
 
         let name = self.consume_identifier("expected identifier in let declaration")?;
 
@@ -612,21 +739,25 @@ impl<'a> Parser<'a> {
 
         let value = self.parse_binary_expr()?;
 
-        if let Expr::Lambda { .. } = value {
+        if let Expr::Lambda { .. } = value.node {
             self.match_token(&TokenKind::Semicolon);
         } else {
             self.consume_token(TokenKind::Semicolon, "expected ';' after let declaration")?;
         }
 
-        Ok(Stmt::LetDecl { name, ty, value })
+        Ok(Spanned::new(Stmt::LetDecl { name, ty, value }, span))
     }
 
-    fn parse_refraction_decl(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_refraction_decl(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume 'Refraction'
 
-        let name = self.consume_identifier("Expected type name after 'Refraction'")?;
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
 
-        self.consume_token(TokenKind::Equal, "Expected '=' after type name")?;
+        let name = self.consume_identifier("Expected type name after 'Refraction'")?;
 
         match self.peek().kind {
             TokenKind::Facet => self.parse_facet_body(name),
@@ -634,18 +765,26 @@ impl<'a> Parser<'a> {
                 // Assume type alias
                 let alias_type = self.parse_type()?;
 
-                self.consume_token(TokenKind::Semicolon, "Expected ';' after type alias")?;
-
-                Ok(Stmt::TypeAlias {
-                    name,
-                    aliased: alias_type,
-                })
+                Ok(Spanned::new(
+                    Stmt::TypeAlias {
+                        name,
+                        aliased: alias_type,
+                    },
+                    span,
+                ))
             }
         }
     }
 
-    fn parse_facet_body(&mut self, name: String) -> Result<Stmt, ParseError> {
+    fn parse_facet_body(&mut self, name: String) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume 'Facet'
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         self.consume_token(TokenKind::LeftBrace, "Expected '{' after 'Facet'")?;
 
         let mut fields = Vec::new();
@@ -658,11 +797,17 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenKind::RightBrace, "Expected '}' after facet body")?;
 
-        Ok(Stmt::FacetDecl { name, fields })
+        Ok(Spanned::new(Stmt::FacetDecl { name, fields }, span))
     }
 
-    fn parse_facet_literal(&mut self, type_name: String) -> Result<Expr, ParseError> {
+    fn parse_facet_literal(&mut self, type_name: String) -> Result<Spanned<Expr>, ParseError> {
         let mut fields = Vec::new();
+
+        let span_start = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
 
         while self.peek().kind != TokenKind::RightBrace {
             let field_name = self.consume_identifier("Expected field name")?;
@@ -675,14 +820,23 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenKind::RightBrace, "Expected '}' after facet literal")?;
 
-        Ok(Expr::FacetInit { type_name, fields })
+        Ok(Spanned::new(
+            Expr::FacetInit { type_name, fields },
+            span_start,
+        ))
     }
 
-    fn parse_literal(&mut self) -> Result<Expr, ParseError> {
+    fn parse_literal(&mut self) -> Result<Spanned<Expr>, ParseError> {
+        let span_start = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         match &self.previous.kind {
-            TokenKind::True => Ok(Expr::Bool(true)),
-            TokenKind::False => Ok(Expr::Bool(false)),
-            TokenKind::Umbra => Ok(Expr::Umbra),
+            TokenKind::True => Ok(Spanned::new(Expr::Bool(true), span_start)),
+            TokenKind::False => Ok(Spanned::new(Expr::Bool(false), span_start)),
+            TokenKind::Umbra => Ok(Spanned::new(Expr::Umbra, span_start)),
             _ => Err(ParseError::new(
                 "Expected literal",
                 &self.filename,
@@ -691,9 +845,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_string(&mut self) -> Result<Expr, ParseError> {
+    fn parse_string(&mut self) -> Result<Spanned<Expr>, ParseError> {
+        let span_start = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         if let TokenKind::String(ref s) = self.previous.kind {
-            Ok(Expr::String(s.clone()))
+            Ok(Spanned::new(Expr::String(s.clone()), span_start))
         } else {
             Err(ParseError::new(
                 "Expected string",
@@ -703,7 +863,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_precedence(&mut self, min_prec: Precedence) -> Result<Expr, ParseError> {
+    fn parse_precedence(&mut self, min_prec: Precedence) -> Result<Spanned<Expr>, ParseError> {
         let token = self.advance().clone();
         let prefix_rule = self
             .get_rule(&token.kind)
@@ -730,16 +890,21 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+    fn parse_unary(&mut self) -> Result<Spanned<Expr>, ParseError> {
         let op = self.previous.kind.clone();
         let right = self.parse_precedence(Precedence::Unary)?;
-        Ok(Expr::Unary {
-            op: Self::map_unary_op(self, op)?,
-            expr: Box::new(right),
-        })
+        let span = right.span.clone();
+
+        Ok(Spanned::new(
+            Expr::Unary {
+                op: Self::map_unary_op(self, op)?,
+                expr: Box::new(right),
+            },
+            span,
+        ))
     }
 
-    fn parse_logical(&mut self, left: Expr) -> Result<Expr, ParseError> {
+    fn parse_logical(&mut self, left: Spanned<Expr>) -> Result<Spanned<Expr>, ParseError> {
         let op = match self.previous.kind {
             TokenKind::AndAnd => LogicalOp::AndAnd,
             TokenKind::OrOr => LogicalOp::OrOr,
@@ -753,14 +918,18 @@ impl<'a> Parser<'a> {
         };
 
         let right = self.parse_precedence(Precedence::And)?;
-        Ok(Expr::Logical {
-            left: Box::new(left),
-            op,
-            right: Box::new(right),
-        })
+        let span_start = left.span.clone();
+        Ok(Spanned::new(
+            Expr::Logical {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            },
+            span_start,
+        ))
     }
 
-    fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_statement(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         match self.peek().kind {
             TokenKind::Constellation => self.parse_constellation(),
             TokenKind::Const => self.parse_const(),
@@ -778,8 +947,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_constellation(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_constellation(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume constellation
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         let name = match &self.peek().kind {
             TokenKind::Identifier(name) => name.clone(),
             _ => {
@@ -793,11 +969,18 @@ impl<'a> Parser<'a> {
 
         self.advance(); // consume identifier
 
-        Ok(Stmt::ConstellationDecl(name))
+        Ok(Spanned::new(Stmt::ConstellationDecl(name), span))
     }
 
-    fn parse_return(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_return(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume return
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         let value = if !self.match_token(&TokenKind::Semicolon) {
             Some(self.parse_expr()?)
         } else {
@@ -806,19 +989,33 @@ impl<'a> Parser<'a> {
 
         self.consume_token(TokenKind::Semicolon, "Expected ';' after return")?;
 
-        Ok(Stmt::Return(value))
+        Ok(Spanned::new(Stmt::Return(value), span))
     }
 
-    fn parse_break(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_break(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume 'break'
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         self.consume_token(TokenKind::Semicolon, "Expected ';' after break")?;
-        Ok(Stmt::Break)
+        Ok(Spanned::new(Stmt::Break, span))
     }
 
-    fn parse_continue(&mut self) -> Result<Stmt, ParseError> {
+    fn parse_continue(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume 'continue'
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
         self.consume_token(TokenKind::Semicolon, "Expected ';' after continue")?;
-        Ok(Stmt::Continue)
+        Ok(Spanned::new(Stmt::Continue, span))
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
@@ -829,9 +1026,15 @@ impl<'a> Parser<'a> {
             TokenKind::Lumens => Ok(Type::Lumens),
             TokenKind::Umbra => Ok(Type::Umbra),
             TokenKind::Photon => Ok(Type::Photon),
-            TokenKind::Lambda => Ok(Type::Lambda),
+            TokenKind::Function => {
+                self.consume_token(TokenKind::Less, "Expected '<' after Function")?;
+
+                let return_ty = self.parse_type()?;
+                self.consume_token(TokenKind::Greater, "Expected '>' after return type")?;
+                Ok(Type::Function(vec![], Box::new(return_ty)))
+            }
             TokenKind::LeftBracket => self.parse_array_type(),
-            TokenKind::Identifier(name) => Ok(Type::Custom(name.clone())),
+            TokenKind::Identifier(name) => Ok(Type::Named(name.clone())),
             _ => Err(ParseError::new(
                 format!("Invalid type: {:?}", token.kind),
                 &self.filename,

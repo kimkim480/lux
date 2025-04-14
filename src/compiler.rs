@@ -1,10 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    ast::{BinaryOp, Expr, LogicalOp, Stmt},
-    error::{ParseError, PrismError, PrismResult},
-    lexer::Lexer,
-    parser::Parser,
+    ast::{BinaryOp, Expr, LogicalOp, Spanned, Stmt},
+    error::{PrismError, PrismResult},
+    get_source_line,
     value::{Chunk, Function, Op, TypeDef, Value},
 };
 
@@ -17,21 +16,17 @@ struct LoopContext {
 
 #[derive(Clone, Debug)]
 pub struct Compiler {
-    filename: String,
-    ast: Vec<Stmt>,
+    ast: Vec<Spanned<Stmt>>,
     pub globals: HashMap<String, Value>,
     pub context: CompilerContext,
     pub enclosing: Option<Rc<RefCell<Compiler>>>,
     loop_stack: Vec<LoopContext>,
     pub type_defs: HashMap<String, TypeDef>,
+    source: String,
 }
 
 impl Compiler {
-    pub fn new(filename: &str, source: String) -> Result<Rc<RefCell<Self>>, ParseError> {
-        let lexer = Lexer::new(&source, filename);
-        let mut parser = Parser::new(filename, lexer);
-        let ast = parser.parse()?;
-
+    pub fn new(source: &String, ast: Vec<Spanned<Stmt>>) -> Rc<RefCell<Self>> {
         let _start = Rc::new(RefCell::new(Function {
             name: "_start".to_string(),
             arity: 0,
@@ -50,15 +45,15 @@ impl Compiler {
             next_slot: 0,
         };
 
-        Ok(Rc::new(RefCell::new(Compiler {
-            filename: filename.to_string(),
+        Rc::new(RefCell::new(Compiler {
             ast,
             globals: HashMap::new(),
             context,
             enclosing: None,
             loop_stack: Vec::new(),
             type_defs: HashMap::new(),
-        })))
+            source: source.clone(),
+        }))
     }
 
     pub fn compile(&mut self) -> PrismResult<Rc<RefCell<Function>>> {
@@ -69,7 +64,11 @@ impl Compiler {
             self.emit(Op::GetGlobal("Prism".to_string()));
             self.emit(Op::Call(0));
         } else {
-            return Err(PrismError::Compile("Prism() not found".to_string()));
+            return Err(PrismError::compile_error(
+                "Prism() not found",
+                &self.ast[0].span,
+                &get_source_line(&self.source, self.ast[0].span.line),
+            ));
         }
 
         // Return Umbra (implicitly)
@@ -80,7 +79,7 @@ impl Compiler {
         Ok(self.context.function.clone())
     }
 
-    fn compile_stmts(&mut self, stmts: &[Stmt]) -> Result<(), PrismError> {
+    fn compile_stmts(&mut self, stmts: &[Spanned<Stmt>]) -> Result<(), PrismError> {
         for stmt in stmts {
             self.compile_stmt(stmt)?;
         }
@@ -88,14 +87,16 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_stmt(&mut self, stmt: &Stmt) -> Result<(), PrismError> {
-        match stmt {
-            Stmt::ConstellationDecl(name) => {}
+    fn compile_stmt(&mut self, stmt: &Spanned<Stmt>) -> Result<(), PrismError> {
+        match &stmt.node {
+            Stmt::ConstellationDecl(_) => {}
 
             Stmt::LetDecl { name, value, .. } => {
                 if self.context.is_global_scope {
-                    return Err(PrismError::Compile(
-                        " `let` is not allowed at global scope".to_string(),
+                    return Err(PrismError::compile_error(
+                        " `let` is not allowed at global scope",
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
                     ));
                 }
 
@@ -103,10 +104,11 @@ impl Compiler {
                     match self.context.function.borrow().chunk.constants[slot] {
                         Value::Function(_) => {}
                         _ => {
-                            return Err(PrismError::Compile(format!(
-                                "Variable '{}' already declared in this scope",
-                                name
-                            )));
+                            return Err(PrismError::compile_error(
+                                format!("Variable '{}' already declared in this scope", name),
+                                &stmt.span,
+                                &get_source_line(&self.source, stmt.span.line),
+                            ));
                         }
                     }
                 }
@@ -118,49 +120,28 @@ impl Compiler {
 
             Stmt::ConstDecl { name, value, .. } => {
                 if !self.context.is_global_scope {
-                    return Err(PrismError::Compile(
-                        " `const` is not allowed at local scope".to_string(),
+                    return Err(PrismError::compile_error(
+                        " `const` is not allowed at local scope",
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
                     ));
                 }
 
                 if self.globals.contains_key(name) {
-                    return Err(PrismError::Compile(format!(
-                        "Constant '{}' already declared in this scope",
-                        name
-                    )));
+                    return Err(PrismError::compile_error(
+                        format!("Constant '{}' already declared in this scope", name),
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
                 }
 
                 Self::compile_expr(self, value)?;
                 self.emit(Op::SetGlobal(name.clone()));
             }
 
-            Stmt::FacetDecl { name, fields } => {
-                if self.type_defs.contains_key(name) {
-                    return Err(PrismError::Compile(format!(
-                        "Type '{}' already defined",
-                        name
-                    )));
-                }
+            Stmt::FacetDecl { .. } => {} // handled in typechecker
 
-                self.type_defs.insert(
-                    name.clone(),
-                    TypeDef::Facet {
-                        fields: fields.clone(),
-                    },
-                );
-            }
-
-            Stmt::TypeAlias { name, aliased } => {
-                if self.type_defs.contains_key(name) {
-                    return Err(PrismError::Compile(format!(
-                        "Type '{}' already defined",
-                        name
-                    )));
-                }
-
-                self.type_defs
-                    .insert(name.clone(), TypeDef::Alias(aliased.clone()));
-            }
+            Stmt::TypeAlias { .. } => {} // handled in typechecker
 
             Stmt::Expr(expr) => {
                 Self::compile_expr(self, expr)?;
@@ -179,10 +160,11 @@ impl Compiler {
                 ..
             } => {
                 if self.context.resolve_local(name).is_some() || self.globals.contains_key(name) {
-                    return Err(PrismError::Compile(format!(
-                        "Function '{}' already declared in this scope",
-                        name
-                    )));
+                    return Err(PrismError::compile_error(
+                        format!("Function '{}' already declared in this scope", name),
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
                 }
 
                 let function = Rc::new(RefCell::new(Function {
@@ -198,7 +180,7 @@ impl Compiler {
                 let parent = Rc::new(RefCell::new(self.clone()));
 
                 let nested = Rc::new(RefCell::new(Compiler {
-                    filename: self.filename.clone(),
+                    source: self.source.clone(),
                     ast: body.clone(),
                     globals: self.globals.clone(),
                     context: CompilerContext {
@@ -382,7 +364,7 @@ impl Compiler {
             }
 
             Stmt::Break => {
-                if let Some(ctx) = self.loop_stack.last() {
+                if let Some(_) = self.loop_stack.last() {
                     let jump_pos = self.current_ip();
                     self.emit(Op::Jump(usize::MAX));
                     self.loop_stack
@@ -391,12 +373,16 @@ impl Compiler {
                         .break_jumps
                         .push(jump_pos);
                 } else {
-                    return Err(PrismError::Compile("`break` outside of loop".into()));
+                    return Err(PrismError::compile_error(
+                        "`break` outside of loop",
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
                 }
             }
 
             Stmt::Continue => {
-                if let Some(ctx) = self.loop_stack.last() {
+                if let Some(_) = self.loop_stack.last() {
                     let jump_pos = self.current_ip();
                     self.emit(Op::Jump(usize::MAX));
                     self.loop_stack
@@ -405,7 +391,11 @@ impl Compiler {
                         .continue_jumps
                         .push(jump_pos);
                 } else {
-                    return Err(PrismError::Compile("`continue` outside of loop".into()));
+                    return Err(PrismError::compile_error(
+                        "`continue` outside of loop",
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
                 }
             }
 
@@ -427,27 +417,29 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_expr(&mut self, expr: &Expr) -> Result<(), PrismError> {
-        match expr {
+    fn compile_expr(&mut self, expr: &Spanned<Expr>) -> Result<(), PrismError> {
+        match &expr.node {
             Expr::FacetInit { type_name, fields } => {
                 // 1. Check that the type exists
                 let expected_fields = match self.type_defs.get(type_name) {
                     Some(TypeDef::Facet { fields }) => fields.clone(),
                     _ => {
-                        return Err(PrismError::Compile(format!(
-                            "Type '{}' not found or not a Facet",
-                            type_name
-                        )));
+                        return Err(PrismError::compile_error(
+                            format!("Type '{}' not found or not a Facet", type_name),
+                            &expr.span,
+                            &get_source_line(&self.source, expr.span.line),
+                        ));
                     }
                 };
 
                 // 2. Compile the field expressions in the declared order
                 for (decl_name, _) in &expected_fields {
                     let Some((_, expr)) = fields.iter().find(|(n, _)| n == decl_name) else {
-                        return Err(PrismError::Compile(format!(
-                            "Missing field '{}' in '{}'",
-                            decl_name, type_name
-                        )));
+                        return Err(PrismError::compile_error(
+                            format!("Missing field '{}' in '{}'", decl_name, type_name),
+                            &expr.span,
+                            &get_source_line(&self.source, expr.span.line),
+                        ));
                     };
                     self.compile_expr(expr)?;
                 }
@@ -482,7 +474,7 @@ impl Compiler {
                 self.emit(Op::ArraySet);
             }
 
-            Expr::Index { array, index } => {
+            Expr::ArrayGet { array, index } => {
                 self.compile_expr(array)?;
                 self.compile_expr(index)?;
                 self.emit(Op::ArrayGet);
@@ -532,9 +524,11 @@ impl Compiler {
             }
 
             Expr::Assign { name, value } => {
-                if let Expr::Assign { .. } = **value {
-                    return Err(PrismError::Compile(
-                        "Chained assignment is not allowed".to_string(),
+                if let Expr::Assign { .. } = value.node {
+                    return Err(PrismError::compile_error(
+                        "Chained assignment is not allowed",
+                        &expr.span,
+                        &get_source_line(&self.source, expr.span.line),
                     ));
                 }
 
@@ -551,10 +545,11 @@ impl Compiler {
                             self.emit(Op::GetUpvalue(index));
                         }
                         None => {
-                            return Err(PrismError::Compile(format!(
-                                "Cannot assign to '{}' constant",
-                                name
-                            )));
+                            return Err(PrismError::compile_error(
+                                format!("Cannot assign to '{}' constant", name),
+                                &expr.span,
+                                &get_source_line(&self.source, expr.span.line),
+                            ));
                         }
                     },
                 }
@@ -577,10 +572,11 @@ impl Compiler {
                         self.emit(Op::GetUpvalue(index));
                     }
                     None => {
-                        return Err(PrismError::Compile(format!(
-                            "Undefined variable '{}'",
-                            name
-                        )));
+                        return Err(PrismError::compile_error(
+                            format!("Undefined variable '{}'", name),
+                            &expr.span,
+                            &get_source_line(&self.source, expr.span.line),
+                        ));
                     }
                 },
             },
@@ -619,7 +615,7 @@ impl Compiler {
             }
 
             Expr::Call { callee, args } => {
-                if let Expr::Identifier(name) = &**callee {
+                if let Expr::Identifier(name) = &callee.node {
                     let expected_arity = match self.globals.get(name) {
                         Some(Value::Function(func)) => Some(func.borrow().arity),
                         _ => self.context.resolve_local(name).and_then(|slot| {
@@ -632,12 +628,16 @@ impl Compiler {
 
                     if let Some(expected) = expected_arity {
                         if expected != args.len() {
-                            return Err(PrismError::Compile(format!(
-                                "Function '{}' expects {} arguments, but got {}",
-                                name,
-                                expected,
-                                args.len()
-                            )));
+                            return Err(PrismError::compile_error(
+                                format!(
+                                    "Function '{}' expects {} arguments, but got {}",
+                                    name,
+                                    expected,
+                                    args.len()
+                                ),
+                                &expr.span,
+                                &get_source_line(&self.source, expr.span.line),
+                            ));
                         }
                     }
                 }
@@ -669,7 +669,7 @@ impl Compiler {
                 let parent = Rc::new(RefCell::new(self.clone()));
 
                 let nested = Rc::new(RefCell::new(Compiler {
-                    filename: self.filename.clone(),
+                    source: self.source.clone(),
                     ast: body.clone(),
                     globals: self.globals.clone(),
                     context: CompilerContext {

@@ -10,5 +10,4 @@ fn Prism() {
   emit true || true;   // test: <true>
   emit !false;         // test: <true>
   emit !true;          // test: <false>
-  emit !Umbra;         // test: <💥 Runtime error: Cannot apply '!' to non-Photon value>
 }

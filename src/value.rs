@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use crate::ast::Type;
+use crate::typechecker::LuxType;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -227,6 +227,6 @@ pub enum Upvalue {
 
 #[derive(Debug, Clone)]
 pub enum TypeDef {
-    Facet { fields: Vec<(String, Type)> },
-    Alias(Type),
+    Facet { fields: Vec<(String, LuxType)> },
+    Alias(LuxType),
 }

@@ -1,15 +1,18 @@
 // skip
 constellation main
 
-Refraction Point = Facet {
+Refraction Point Facet {
   x Light
   y Light
 }
 
-Refraction Number = Light;
+Refraction Number Light
 
 fn Prism() {
   let p: Point = Point { x: 1, y: 2 };
+  let x: Light = p.x;
+
+  let y: Light = 1 + 1;
 
   emit p;
   emit p.x;

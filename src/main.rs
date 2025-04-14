@@ -6,11 +6,15 @@ mod lexer;
 mod parser;
 mod prism;
 mod token;
+mod typechecker;
 mod value;
 
 use compiler::Compiler;
+use lexer::Lexer;
+use parser::Parser;
 use prism::Prism;
 use std::{env, fs};
+use typechecker::TypeChecker;
 use value::{CallFrame, TypeDef};
 
 fn main() {
@@ -28,7 +32,17 @@ fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let source = fs::read_to_string(&filename)
         .map_err(|e| format!("Could not read file '{}': {}", filename, e))?;
 
-    let compiler = Compiler::new(&filename, source)?;
+    // TODO: adjust the pipeline
+    let lexer = Lexer::new(&source, &filename);
+    let mut parser = Parser::new(&filename, lexer);
+    let ast = parser.parse()?;
+
+    let mut type_checker = TypeChecker::new(&source);
+    type_checker.check(&ast)?;
+
+    let compiler = Compiler::new(&source, ast);
+    compiler.borrow_mut().type_defs = type_checker.type_defs;
+
     let _start = compiler.borrow_mut().compile()?;
 
     let mut prism = Prism::new();
@@ -60,4 +74,8 @@ fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     prism.run()?;
 
     Ok(())
+}
+
+fn get_source_line(source: &String, line: usize) -> String {
+    source.lines().nth(line - 1).unwrap_or("").to_string()
 }

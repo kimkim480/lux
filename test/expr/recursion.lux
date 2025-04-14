@@ -3,14 +3,15 @@ constellation main
 
 fn Prism() {
   emit "Prism"; // test: <Prism>
-  let y: Umbra = closure();
-  y();
+  let y: Function<Light> = closure();
+  
+  emit y(); // test: <10>
 }
 
-fn closure() {
+fn closure() -> Function<Light> {
   let x: Light = 10;
 
-  fn increment() { return x; }
+  fn increment() -> Light { return x; }
 
   return increment;
 }

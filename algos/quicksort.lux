@@ -1,7 +1,7 @@
-constellation main;
+constellation main
 
 fn quicksort(xs: [Light], low: Light, high: Light) -> Umbra {
-  if low < high {
+  if (low < high) {
     let p: Light = partition(xs, low, high);
     quicksort(xs, low, p - 1);
     quicksort(xs, p + 1, high);
@@ -13,7 +13,7 @@ fn partition(xs: [Light], low: Light, high: Light) -> Light {
   let i: Light = low - 1;
 
   for (let j: Light = low; j < high; j += 1) {
-    if xs[j] <= pivot {
+    if (xs[j] <= pivot) {
       i += 1;
       // swap xs[i] and xs[j]
       let temp: Light = xs[i];
