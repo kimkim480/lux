@@ -167,6 +167,12 @@ impl Compiler {
                     ));
                 }
 
+                let slot = if self.context.is_global_scope {
+                    0 // dummy; not used in global scope
+                } else {
+                    self.context.declare_local(name)
+                };
+
                 let function = Rc::new(RefCell::new(Function {
                     name: name.clone(),
                     arity: *arity,
@@ -203,6 +209,7 @@ impl Compiler {
                 nested.borrow_mut().compile_stmts(body)?;
                 nested.borrow_mut().context.end_scope();
 
+                // implicitly return Umbra
                 let index = nested.borrow_mut().add_constant(Value::Umbra);
                 nested.borrow_mut().emit(Op::Constant(index));
                 nested.borrow_mut().emit(Op::Return);
@@ -212,9 +219,7 @@ impl Compiler {
                 if self.context.is_global_scope {
                     self.globals.insert(name.clone(), value.clone());
                 } else {
-                    let fn_index = self.add_constant(value.clone());
-
-                    let slot = self.context.declare_local(name);
+                    let fn_index = self.add_constant(value);
 
                     let upvalues: Vec<(bool, usize)> = nested
                         .borrow()

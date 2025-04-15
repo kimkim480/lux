@@ -192,7 +192,7 @@ impl Chunk {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CallFrame {
     pub function: Rc<RefCell<Function>>,
     pub ip: usize,
@@ -213,7 +213,7 @@ impl fmt::Display for Function {
         write!(f, "<fn {}>", self.name)
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Closure {
     pub function: Rc<RefCell<Function>>,
     pub upvalues: Vec<Rc<RefCell<Upvalue>>>,

@@ -63,13 +63,6 @@ pub enum TokenKind {
     Import,
     As,
 
-    // Native types
-    Umbra,
-    Light,
-    Lumens,
-    Photon,
-    Function,
-
     // Native functions
     Emit,
 

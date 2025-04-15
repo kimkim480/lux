@@ -1,18 +1,17 @@
 constellation main
 
 fn Prism() {
-  let lamb: Function<Light> = closure();
-  
-  lamb();
-  emit lamb();
+  let lamb: (Light) -> Light = closure();
+
+  emit lamb(2);
 }
 
-fn closure() -> Function<Light> {
+fn closure() -> (Light) -> Light {
   let i: Light = 0;
 
-  fn inc() -> Light {
-    return i += 1;
+  fn inc(base: Light) -> Light {
+    return i += base;
   }
-
+  
   return inc;
 }

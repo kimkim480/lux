@@ -6,6 +6,7 @@ use crate::{
     value::{CallFrame, Closure, Op, Upvalue, Value},
 };
 
+#[derive(Clone)]
 pub struct Prism {
     pub frames: Vec<CallFrame>,
     pub stack: Vec<Value>,
@@ -30,7 +31,7 @@ impl Prism {
         let a = self.pop()?;
 
         if self.debug_trace {
-            // println!("a: {:?}\nb: {:?}", a, b);
+            // println!("a: {:?}\nop: {:?}\nb: {:?}", a, op, b);
         }
 
         let result = match (a, b) {
@@ -107,6 +108,7 @@ impl Prism {
 
     pub fn run(&mut self) -> PrismResult<()> {
         loop {
+            // let prism = self.clone();
             let frame = self.frames.last_mut().unwrap();
             if frame.ip >= frame.function.borrow().chunk.code.len() {
                 break;
@@ -118,6 +120,8 @@ impl Prism {
                     .borrow()
                     .chunk
                     .trace_op(&format!("[{}]", frame.function.borrow().name), frame.ip);
+
+                // prism.print_stack_trace();
             }
 
             let op = {
@@ -274,6 +278,7 @@ impl Prism {
 
                     let mut captured = Vec::new();
                     let offset = frame.offset;
+
                     for (is_local, index) in upvalues {
                         let upvalue = if is_local {
                             self.capture_upvalue(offset + index)
@@ -460,19 +465,19 @@ impl Prism {
                 }
 
                 Op::Return => {
-                    let return_value = self.pop()?; // 1. get return value
-                    self.frames.pop(); // 2. pop frame
-                    self.close_upvalues(self.stack.len()); // 3. close captured vars
+                    let frame = self.frames.pop().unwrap(); // 1. pop the call frame
 
-                    // 4. remove locals from stack
-                    self.stack.truncate(self.stack.len());
+                    self.close_upvalues(frame.offset); // 2. close captured vars
 
-                    // 5. push return value for caller
-                    self.push(return_value)?;
+                    // 3. preserve return value from top of stack
+                    let return_value = self.stack.last().cloned().unwrap_or(Value::Umbra);
 
-                    // 6. if no more frames, we’re done
+                    self.stack.truncate(frame.offset + 1); // 4. remove locals + callee
+
+                    self.push(return_value)?; // 5. push return for caller
+
                     if self.frames.is_empty() {
-                        return Ok(());
+                        return Ok(()); // 6. exit if no frames
                     }
                 }
             }

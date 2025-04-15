@@ -836,7 +836,14 @@ impl<'a> Parser<'a> {
         match &self.previous.kind {
             TokenKind::True => Ok(Spanned::new(Expr::Bool(true), span_start)),
             TokenKind::False => Ok(Spanned::new(Expr::Bool(false), span_start)),
-            TokenKind::Umbra => Ok(Spanned::new(Expr::Umbra, span_start)),
+            TokenKind::Identifier(name) => match name.as_str() {
+                "Umbra" => Ok(Spanned::new(Expr::Umbra, span_start)),
+                _ => Err(ParseError::new(
+                    "Expected literal",
+                    &self.filename,
+                    self.peek(),
+                )),
+            },
             _ => Err(ParseError::new(
                 "Expected literal",
                 &self.filename,
@@ -1019,22 +1026,71 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        let left = self.parse_type_primary()?;
+
+        Ok(left)
+    }
+
+    fn parse_type_primary(&mut self) -> Result<Type, ParseError> {
         let token = self.peek().clone();
         self.advance();
         match &token.kind {
-            TokenKind::Light => Ok(Type::Light),
-            TokenKind::Lumens => Ok(Type::Lumens),
-            TokenKind::Umbra => Ok(Type::Umbra),
-            TokenKind::Photon => Ok(Type::Photon),
-            TokenKind::Function => {
-                self.consume_token(TokenKind::Less, "Expected '<' after Function")?;
+            TokenKind::LeftParen => {
+                let mut params = vec![];
 
-                let return_ty = self.parse_type()?;
-                self.consume_token(TokenKind::Greater, "Expected '>' after return type")?;
-                Ok(Type::Function(vec![], Box::new(return_ty)))
+                if self.peek().kind != TokenKind::RightParen {
+                    loop {
+                        params.push(self.parse_type()?);
+                        if self.peek().kind != TokenKind::Comma {
+                            break;
+                        }
+                        self.advance(); // consume ','
+                    }
+                }
+
+                self.consume_token(TokenKind::RightParen, "Expected ')' in function type")?;
+
+                let next = self.peek();
+                if next.kind == TokenKind::Arrow {
+                    // We are parsing a function type
+                    self.advance(); // consume '->'
+                    let ret_type = self.parse_type()?;
+                    Ok(Type::Function(params, Box::new(ret_type)))
+                } else if params.len() == 1 {
+                    Ok(params.into_iter().next().unwrap())
+                } else {
+                    return Err(ParseError::new(
+                        "Unexpected multiple types in parentheses — expected function type",
+                        &self.filename,
+                        &next,
+                    ));
+                }
             }
+
+            TokenKind::Identifier(name) => match name.as_str() {
+                "Light" => Ok(Type::Light),
+                "Lumens" => Ok(Type::Lumens),
+                "Umbra" => Ok(Type::Umbra),
+                "Photon" => Ok(Type::Photon),
+                "Function" => {
+                    self.consume_token(TokenKind::LeftParen, "Expected '(' after Function")?;
+                    self.consume_token(
+                        TokenKind::LeftBracket,
+                        "Expected '[' in Function parameters",
+                    )?;
+                    let mut params = Vec::new();
+                    while self.peek().kind != TokenKind::RightBracket {
+                        params.push(self.parse_type()?);
+                    }
+                    self.consume_token(TokenKind::RightBracket, "Expected ']' after parameters")?;
+                    self.consume_token(TokenKind::Comma, "Expected ',' after parameters")?;
+                    let return_type = self.parse_type()?;
+                    self.consume_token(TokenKind::RightParen, "Expected ')' after Function")?;
+                    Ok(Type::Function(params, Box::new(return_type)))
+                }
+                _ => Ok(Type::Named(name.clone())), // Handle custom type names
+            },
             TokenKind::LeftBracket => self.parse_array_type(),
-            TokenKind::Identifier(name) => Ok(Type::Named(name.clone())),
             _ => Err(ParseError::new(
                 format!("Invalid type: {:?}", token.kind),
                 &self.filename,
@@ -1146,7 +1202,7 @@ impl<'a> Parser<'a> {
                 infix: Some(Parser::parse_index),
                 precedence: Precedence::Call,
             },
-            True | False | Umbra => ParseRule {
+            True | False => ParseRule {
                 prefix: Some(Parser::parse_literal),
                 infix: None,
                 precedence: Precedence::None,
@@ -1156,10 +1212,17 @@ impl<'a> Parser<'a> {
                 infix: None,
                 precedence: Precedence::None,
             },
-            Identifier(_) => ParseRule {
-                prefix: Some(Parser::parse_identifier),
-                infix: None,
-                precedence: Precedence::None,
+            Identifier(name) => match name.as_str() {
+                "Umbra" => ParseRule {
+                    prefix: Some(Parser::parse_literal),
+                    infix: None,
+                    precedence: Precedence::None,
+                },
+                _ => ParseRule {
+                    prefix: Some(Parser::parse_identifier),
+                    infix: None,
+                    precedence: Precedence::None,
+                },
             },
             Equal => ParseRule {
                 prefix: None,

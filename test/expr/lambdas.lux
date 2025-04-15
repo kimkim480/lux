@@ -2,7 +2,7 @@
 constellation main
 
 fn Prism() {
-  let f: Function<Umbra> = fn() {
+  let f: Function([], Umbra) = fn() {
     emit "simple"; // test: <simple>
   };
 
@@ -16,7 +16,7 @@ fn Prism() {
 
 fn test_closure() {
   let msg: [Lumens] = ["Lux"];
-  let shout: Function<Umbra> = fn() {
+  let shout: Function([], Umbra) = fn() {
     emit msg; // test: <Lux>
   };
   shout();
@@ -24,14 +24,14 @@ fn test_closure() {
 
 fn test_loop_capture() {
   for (let i: Light = 0; i < 3; i = i + 1) {
-    let log: Function<Umbra> = fn() {
+    let log: Function([], Umbra) = fn() {
       emit i; // test: <0> <1> <2>
     };
     log();
   }
 }
 
-fn make_logger() -> Function<Umbra> {
+fn make_logger() -> Function([], Umbra) {
   let prefix: Lumens = "hi";
 
   return fn() {
@@ -40,6 +40,6 @@ fn make_logger() -> Function<Umbra> {
 }
 
 fn test_lambda_return() {
-  let log: Function<Umbra> = make_logger();
+  let log: Function([], Umbra) = make_logger();
   log();
 }

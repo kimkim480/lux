@@ -28,7 +28,14 @@ impl fmt::Display for LuxType {
             LuxType::Array(inner) => write!(f, "Array<{}>", inner),
             LuxType::Named(name) => write!(f, "{}", name),
             LuxType::Facet(name, _) => write!(f, "{}", name),
-            LuxType::Function(_, return_type) => write!(f, "Function<{}>", return_type),
+            LuxType::Function(params, ret) => {
+                let params_str = params
+                    .iter()
+                    .map(|t| format!("{}", t))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "Function({}) -> {}", params_str, ret)
+            }
         }
     }
 }
@@ -123,6 +130,16 @@ impl TypeChecker {
             }
 
             Stmt::LetDecl { name, ty, value } => {
+                // TODO move this to define
+                if let Some(existing) = self.globals.get(name) {
+                    if matches!(existing, LuxType::Function(_, _)) {
+                        return Err(PrismError::type_error(
+                            format!("Cannot redefine function '{}' in local scope", name),
+                            &stmt.span,
+                            &get_source_line(&self.source, stmt.span.line),
+                        ));
+                    }
+                }
                 let expected = self.resolve_type_hint(ty)?;
                 let actual = self.check_expr(value)?;
                 if expected != actual {
