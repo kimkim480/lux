@@ -1,6 +1,18 @@
 constellation main
 
 fn Prism() {
+
+  let x: Light = 1;
+  let y: Light = 2;
+
+  if (x == y) {
+    emit "x == y";
+  }
+
+  if (x != y) {
+    emit "x != y"; // test: <x != y>
+  }
+
   if (true) {
     emit "true branch"; // test: <true branch>
   }

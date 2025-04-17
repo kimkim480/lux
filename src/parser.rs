@@ -740,7 +740,7 @@ impl<'a> Parser<'a> {
         let value = self.parse_binary_expr()?;
 
         if let Expr::Lambda { .. } = value.node {
-            self.match_token(&TokenKind::Semicolon);
+            self.match_token(&TokenKind::Semicolon); // Optional semicolon after lambda
         } else {
             self.consume_token(TokenKind::Semicolon, "expected ';' after let declaration")?;
         }

@@ -115,13 +115,13 @@ impl Prism {
             }
 
             if self.debug_trace {
+                // prism.print_stack_trace();
+
                 frame
                     .function
                     .borrow()
                     .chunk
                     .trace_op(&format!("[{}]", frame.function.borrow().name), frame.ip);
-
-                // prism.print_stack_trace();
             }
 
             let op = {

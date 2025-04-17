@@ -31,6 +31,28 @@ pub enum Type {
     Function(Vec<Type>, Box<Type>),
 }
 
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::Light => write!(f, "Light"),
+            Type::Photon => write!(f, "Photon"),
+            Type::Lumens => write!(f, "Lumens"),
+            Type::Umbra => write!(f, "Umbra"),
+            Type::Array(inner) => write!(f, "Array<{}>", inner),
+            Type::Named(name) => write!(f, "{}", name),
+            Type::Facet(name, _) => write!(f, "{}", name),
+            Type::Function(params, ret) => {
+                let params_str = params
+                    .iter()
+                    .map(|t| format!("{}", t))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "Function({}) -> {}", params_str, ret)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOp {
     Plus,         // +

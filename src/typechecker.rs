@@ -47,6 +47,7 @@ pub struct TypeChecker {
     pub type_defs: HashMap<String, TypeDef>,
     source: String,
     expected_return: Option<LuxType>,
+    did_return: bool,
 }
 
 impl TypeChecker {
@@ -57,6 +58,7 @@ impl TypeChecker {
             type_defs: HashMap::new(),
             source: source.clone(),
             expected_return: None,
+            did_return: false,
         }
     }
 
@@ -156,6 +158,111 @@ impl TypeChecker {
             }
 
             Stmt::FacetDecl { .. } => {}
+            Stmt::ConstellationDecl(_) => {}
+            Stmt::Emit(expr) => {
+                self.check_expr(expr)?; // side effect only
+            }
+            Stmt::Break => {}
+            Stmt::Continue => {}
+
+            Stmt::If {
+                condition,
+                body,
+                else_body,
+            } => {
+                let cond_ty = self.check_expr(&condition)?;
+                if cond_ty != LuxType::Photon {
+                    return Err(PrismError::type_error(
+                        format!("Condition of 'if' must be Photon, got {}", cond_ty),
+                        &condition.span,
+                        &get_source_line(&self.source, condition.span.line),
+                    ));
+                }
+
+                self.enter_scope();
+                for stmt in body {
+                    self.check_stmt(&stmt)?;
+                }
+                self.exit_scope();
+
+                if let Some(else_body) = else_body {
+                    self.enter_scope();
+                    for stmt in else_body {
+                        self.check_stmt(&stmt)?;
+                    }
+                    self.exit_scope();
+                }
+            }
+
+            Stmt::Switch {
+                target,
+                cases,
+                default,
+            } => {
+                let switch_ty = self.check_expr(&target)?;
+
+                for (case_expr, case_body) in cases {
+                    let case_ty = self.check_expr(&case_expr)?;
+                    if case_ty != switch_ty {
+                        return Err(PrismError::type_error(
+                            format!(
+                                "Switch case value type mismatch: expected {}, got {}",
+                                switch_ty, case_ty
+                            ),
+                            &case_expr.span,
+                            &get_source_line(&self.source, case_expr.span.line),
+                        ));
+                    }
+
+                    self.enter_scope();
+                    for stmt in case_body {
+                        self.check_stmt(&stmt)?;
+                    }
+                    self.exit_scope();
+                }
+
+                if let Some(default_body) = default {
+                    self.enter_scope();
+                    for stmt in default_body {
+                        self.check_stmt(&stmt)?;
+                    }
+                    self.exit_scope();
+                }
+            }
+
+            Stmt::For {
+                init,
+                condition,
+                post,
+                body,
+            } => {
+                self.enter_scope();
+
+                if let Some(init_stmt) = init {
+                    self.check_stmt(&init_stmt)?;
+                }
+
+                if let Some(cond_expr) = condition {
+                    let ty = self.check_expr(&cond_expr)?;
+                    if ty != LuxType::Photon {
+                        return Err(PrismError::type_error(
+                            format!("Condition of 'for' must evaluate to Photon, got {}", ty),
+                            &cond_expr.span,
+                            &get_source_line(&self.source, cond_expr.span.line),
+                        ));
+                    }
+                }
+
+                if let Some(post_expr) = post {
+                    self.check_expr(&post_expr)?; // side effect only
+                }
+
+                for stmt in body {
+                    self.check_stmt(&stmt)?;
+                }
+
+                self.exit_scope();
+            }
 
             Stmt::FnDecl {
                 name,
@@ -177,9 +284,26 @@ impl TypeChecker {
                     self.define(param_name, ty);
                 }
 
+                // track whether a return actually happened
+                let prev_return_flag = self.did_return;
+                self.did_return = false;
+
                 for stmt in body {
                     self.check_stmt(&stmt)?;
                 }
+
+                if !self.did_return && return_type != &Type::Umbra {
+                    return Err(PrismError::type_error(
+                        format!(
+                            "Function '{}' declared to return {}, but has no return statement",
+                            name, return_type
+                        ),
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
+                }
+
+                self.did_return = prev_return_flag;
 
                 self.exit_scope();
                 self.expected_return = prev;
@@ -200,27 +324,44 @@ impl TypeChecker {
                     .insert(name.clone(), TypeDef::Alias(aliased_ty));
             }
 
+            Stmt::Expr(expr) => {
+                self.check_expr(expr)?; // side effect only
+            }
+
             Stmt::Return(expr_opt) => {
+                self.did_return = true;
                 let expected = self.expected_return.clone().unwrap_or(LuxType::Umbra);
 
+                let resolved = match expected {
+                    LuxType::Named(name) => {
+                        let Some(TypeDef::Alias(alias)) = self.type_defs.get(&name) else {
+                            return Err(PrismError::type_error(
+                                format!("Type '{}' not found", name),
+                                &stmt.span,
+                                &get_source_line(&self.source, stmt.span.line),
+                            ));
+                        };
+
+                        alias.clone()
+                    }
+                    _ => expected,
+                };
                 let actual = match expr_opt {
                     Some(expr) => self.check_expr(expr)?,
                     None => LuxType::Umbra,
                 };
 
-                if actual != expected {
+                if actual != resolved {
                     return Err(PrismError::type_error(
                         format!(
                             "Return type mismatch: expected {}, got {}",
-                            expected, actual
+                            resolved, actual
                         ),
                         &stmt.span,
                         &get_source_line(&self.source, stmt.span.line),
                     ));
                 }
             }
-
-            _ => {} // Skip switch, for, etc. for now
         }
 
         Ok(())

@@ -20,7 +20,7 @@ These are direct values or identifiers in the source code.
 
 Reserved words that define the structure of Lux programs.
 
-- `Let` — variable binding (not not allowed at global scope)
+- `Let` — variable binding (not allowed at global scope)
 - `Const` — constant binding (allowed at global scope)
 - `Fn` — function definition
 - `Return` — function return statement
@@ -48,6 +48,9 @@ Built-in types recognized by the Lux VM.
 - `Light` — number type (f64)
 - `Lumens` — string type
 - `Photon` — boolean type
+- `[T]` — array of values of type `T`
+- `Function([T], T)` — function taking arguments of type `[T]` and returning type `T`
+- `(T) -> U` — alternate syntax for function types
 
 ---
 
@@ -138,7 +141,7 @@ src/
     └── geometry.lux → Constellation std
 ```
 
-```
+```lux
 // std/math.lux
 Constellation std;
 
@@ -157,4 +160,4 @@ emit std.TWOPI; // OK
 
 ---
 
-Last updated: Apr 3, 2025
+Last updated: Apr 15, 2025

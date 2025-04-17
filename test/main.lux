@@ -9,14 +9,16 @@ Refraction Point Facet {
 Refraction fn_return Function([[Light]], Light)
 
 fn Prism() {
+  let i: Light = 0;
   
   fn x() -> fn_return {
     let xs: [Light] = [1, 0];
+
     fn inner(xs: [Light]) -> Light {
       return xs[0];
     }
 
-    inner();
+    return inner;
   }
 
   let p: Point = Point { x: 1, y: 2 };

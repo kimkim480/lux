@@ -1,0 +1,26 @@
+constellation main
+
+fn binary_search(xs: [Light], low: Light, high: Light, target: Light) -> Light {
+  if (low > high) {
+    return -1;
+  }
+  let sum: Light = low + high;
+  let mid: Light = sum / 2;
+  if (sum % 2 != 0) {
+    mid = (sum - 1) / 2;
+  }
+  let mid_val: Light = xs[mid];
+  if (mid_val == target) {
+    return mid;
+  } else if (mid_val < target) {
+    return binary_search(xs, mid + 1, high, target);
+  } else {
+    return binary_search(xs, low, mid - 1, target);
+  }
+}
+
+fn Prism() {
+  let arr: [Light] = [1, 3, 5, 7, 9];
+  emit binary_search(arr, 0, 4, 7); // test: <3>
+  emit binary_search(arr, 0, 4, 4); // test: <-1>
+}

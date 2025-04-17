@@ -240,6 +240,8 @@ impl Compiler {
                 post,
                 body,
             } => {
+                self.context.begin_scope();
+
                 if let Some(init) = init {
                     self.compile_stmt(init)?;
                 }
@@ -266,9 +268,7 @@ impl Compiler {
 
                 self.loop_stack.push(loop_ctx.clone());
 
-                self.context.begin_scope();
                 self.compile_stmts(body)?;
-                self.context.end_scope();
 
                 let post_start = self.current_ip();
 
@@ -293,6 +293,8 @@ impl Compiler {
                 if let Some(cond_jump) = cond_jump {
                     self.emit_at(Op::JumpIfFalse(end), cond_jump);
                 }
+
+                self.context.end_scope();
             }
 
             Stmt::Switch {
@@ -473,10 +475,20 @@ impl Compiler {
                 index,
                 value,
             } => {
+                // A hack that helps in cases like `arr[i] = function(arr[i]);`
+                let tmp_name = format!("__tmp__{}", self.context.next_slot);
+                let value_slot = self.context.declare_local(&tmp_name);
+
+                self.compile_expr(value)?;
+                self.emit(Op::SetLocal(value_slot));
+
                 self.compile_expr(array)?;
                 self.compile_expr(index)?;
-                self.compile_expr(value)?;
+
+                self.emit(Op::GetLocal(value_slot));
                 self.emit(Op::ArraySet);
+
+                self.emit(Op::GetLocal(value_slot));
             }
 
             Expr::ArrayGet { array, index } => {
