@@ -1,17 +1,9 @@
 constellation bugs
 
 fn Prism() {
-  let xs: [Light] = [1, 2];
-
-  fn map(arr: [Light], callback: (Light) -> Light) {
-    for(let i: Light = 0; i < 2; i += 1) {
-      // Right now this gives a runtime error: Invalid array index.
-      // A possible workaround is use a temp variable to store the callback return result.
-      arr[i] = callback(arr[i]);
-    }
+  fn Prism() {
+    // emit "hello";
+    let foo: Light = 1;
+    fn foo() -> Umbra { }
   }
-
-  emit xs;
-  map(xs, fn(x: Light) -> Light { return x * 2; });
-  emit xs;
 }

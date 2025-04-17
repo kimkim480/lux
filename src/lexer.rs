@@ -58,7 +58,13 @@ impl<'a> Lexer<'a> {
                     self.make_token(TokenKind::Percent)
                 }
             }
-            ':' => self.make_token(TokenKind::Colon),
+            ':' => {
+                if self.match_char(':') {
+                    self.make_token(TokenKind::ColonColon)
+                } else {
+                    self.make_token(TokenKind::Colon)
+                }
+            }
             ';' => self.make_token(TokenKind::Semicolon),
             ',' => self.make_token(TokenKind::Comma),
             '.' => self.make_token(TokenKind::Dot),
@@ -175,6 +181,7 @@ impl<'a> Lexer<'a> {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "Refraction" => TokenKind::Refraction,
+            "Radiate" => TokenKind::Radiate,
             "Facet" => TokenKind::Facet,
             "interface" => TokenKind::Interface,
             "import" => TokenKind::Import,
@@ -216,11 +223,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn make_token(&self, kind: TokenKind) -> Token {
-        Token {
-            kind,
-            line: self.line,
-            column: self.column,
-        }
+        Token::new(kind, self.line, self.column)
     }
 
     fn peek(&self) -> Option<char> {

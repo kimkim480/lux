@@ -13,6 +13,7 @@ pub struct Prism {
     pub globals: HashMap<String, Value>,
     pub debug_trace: bool,
     pub facet_layouts: HashMap<String, Vec<String>>,
+    pub methods: HashMap<(String, String), Value>,
 }
 
 impl Prism {
@@ -23,6 +24,7 @@ impl Prism {
             globals: HashMap::new(),
             debug_trace: false,
             facet_layouts: HashMap::new(),
+            methods: HashMap::new(),
         }
     }
 
@@ -295,6 +297,46 @@ impl Prism {
                     };
                     self.push(Value::Closure(Rc::new(closure)))?;
                 }
+
+                Op::GetMethod(method_name) => {
+                    let receiver = self.pop()?;
+
+                    let (facet_name, _fields) = match receiver.clone() {
+                        Value::Facet { type_name, fields } => (type_name, fields),
+                        _ => {
+                            return Err(PrismError::Runtime(format!(
+                                "Tried to call method '{}' on non‐facet value",
+                                method_name
+                            )));
+                        }
+                    };
+
+                    let func_val = self
+                        .methods
+                        .get(&(facet_name.clone(), method_name.clone()))
+                        .cloned()
+                        .ok_or_else(|| {
+                            PrismError::Runtime(format!(
+                                "Method '{}::{}' not found",
+                                facet_name, method_name
+                            ))
+                        })?;
+
+                    let function = match func_val {
+                        Value::Function(f) => f.clone(),
+                        Value::Closure(c) => c.function.clone(),
+                        _ => unreachable!("facet methods must be functions"),
+                    };
+
+                    let up = Rc::new(RefCell::new(Upvalue::Closed(receiver)));
+                    let method_closure = Closure {
+                        function,
+                        upvalues: vec![up],
+                    };
+
+                    self.push(Value::Closure(Rc::new(method_closure)))?;
+                }
+
                 Op::Call(arity) => {
                     if self.frames.len() >= MAX_FRAMES {
                         return Err(PrismError::Runtime(

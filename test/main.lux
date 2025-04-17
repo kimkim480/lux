@@ -1,15 +1,38 @@
 // skip
 constellation main
 
+const PI: Light = 3.141592653589793;
+
 Refraction Point Facet {
   x Light
   y Light
 }
 
+Refraction Circle Facet {
+  radius Light
+}
+
+Radiate Circle {
+  area() -> Light {
+    return PI * self.radius * self.radius;
+  }
+
+  // optional constructor method
+  new(radius: Light) -> Circle {
+    return Circle { radius: radius };
+  }
+}
+
 Refraction fn_return Function([[Light]], Light)
 
 fn Prism() {
-  let i: Light = 0;
+
+  emit "---------AREA---------";
+  let c1: Circle = Circle { radius: 3.0 };
+  emit c1::area(); // 28.274333882308138
+  emit "----------------------";
+
+  let blue: Light = 1;
   
   fn x() -> fn_return {
     let xs: [Light] = [1, 0];
@@ -23,10 +46,10 @@ fn Prism() {
 
   let p: Point = Point { x: 1, y: 2 };
   let x: Light = p.x;
-
+  
   let y: Light = 1 + 1;
-
-  emit p;
-  emit p.x;
-  emit p.y;
+  
+  emit p; // { x: 1, y: 2 }
+  emit p.x; // 1
+  emit p.y; // 2
 }

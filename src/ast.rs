@@ -208,10 +208,28 @@ pub enum Expr {
         object: Box<Spanned<Expr>>,
         field: String,
     },
+    MethodCall {
+        receiver: Box<Spanned<Expr>>,
+        method: String,
+        args: Vec<Spanned<Expr>>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MethodSig {
+    pub name: String,
+    pub params: Vec<(String, Type)>, // (param_name, type)
+    pub arity: usize,
+    pub body: Vec<Spanned<Stmt>>,
+    pub return_type: Type,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
+    RadiateDecl {
+        facet_name: String,
+        methods: Vec<MethodSig>,
+    },
     ConstDecl {
         name: String,
         ty: Type,

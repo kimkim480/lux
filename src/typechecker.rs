@@ -45,6 +45,7 @@ pub struct TypeChecker {
     globals: HashMap<String, LuxType>,
     locals: Vec<HashMap<String, LuxType>>,
     pub type_defs: HashMap<String, TypeDef>,
+    pub refraction_methods: HashMap<(String, String), LuxType>,
     source: String,
     expected_return: Option<LuxType>,
     did_return: bool,
@@ -56,6 +57,7 @@ impl TypeChecker {
             globals: HashMap::new(),
             locals: vec![HashMap::new()],
             type_defs: HashMap::new(),
+            refraction_methods: HashMap::new(),
             source: source.clone(),
             expected_return: None,
             did_return: false,
@@ -159,6 +161,29 @@ impl TypeChecker {
 
             Stmt::FacetDecl { .. } => {}
             Stmt::ConstellationDecl(_) => {}
+
+            Stmt::RadiateDecl {
+                facet_name,
+                methods,
+            } => {
+                // for now just register the methods’ signatures in a facet‑method table.
+                // We’ll enforce bodies / types in the next step.
+
+                if let None = self.type_defs.get(facet_name) {
+                    return Err(PrismError::type_error(
+                        format!("Refraction type with name '{}' not found", facet_name),
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
+                }
+
+                for method in methods {
+                    let sig = self.resolve_fn_signature(&method.params, &method.return_type)?;
+
+                    self.register_method(facet_name, &method.name, sig, &stmt.span)?;
+                }
+            }
+
             Stmt::Emit(expr) => {
                 self.check_expr(expr)?; // side effect only
             }
@@ -767,6 +792,30 @@ impl TypeChecker {
                 ))
             }
         }
+    }
+
+    fn register_method(
+        &mut self,
+        facet_name: &String,
+        method: &String,
+        signature: LuxType,
+        span: &Span,
+    ) -> Result<(), PrismError> {
+        if self
+            .refraction_methods
+            .contains_key(&(facet_name.clone(), method.clone()))
+        {
+            return Err(PrismError::type_error(
+                format!("Method '{}' already declared", method),
+                &span,
+                &get_source_line(&self.source, span.line),
+            ));
+        }
+
+        self.refraction_methods
+            .insert((facet_name.clone(), method.clone()), signature);
+
+        Ok(())
     }
 
     fn resolve_fn_signature(

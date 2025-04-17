@@ -22,6 +22,7 @@ pub struct Compiler {
     pub enclosing: Option<Rc<RefCell<Compiler>>>,
     loop_stack: Vec<LoopContext>,
     pub type_defs: HashMap<String, TypeDef>,
+    pub methods: HashMap<(String, String), Value>,
     source: String,
 }
 
@@ -52,6 +53,7 @@ impl Compiler {
             enclosing: None,
             loop_stack: Vec::new(),
             type_defs: HashMap::new(),
+            methods: HashMap::new(),
             source: source.clone(),
         }))
     }
@@ -101,6 +103,10 @@ impl Compiler {
                 }
 
                 if let Some(slot) = self.context.resolve_local(name) {
+                    println!(
+                        "slot: {:?}",
+                        self.context.function.borrow().chunk.constants[slot]
+                    );
                     match self.context.function.borrow().chunk.constants[slot] {
                         Value::Function(_) => {}
                         _ => {
@@ -152,6 +158,65 @@ impl Compiler {
                 self.emit(Op::Print);
             }
 
+            Stmt::RadiateDecl {
+                facet_name,
+                methods,
+            } => {
+                if !self.context.is_global_scope {
+                    return Err(PrismError::compile_error(
+                        " `Radiate` declarations must be at global scope",
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
+                }
+
+                for method in methods {
+                    let function = Rc::new(RefCell::new(Function {
+                        name: method.name.clone(),
+                        arity: method.arity,
+                        chunk: Chunk {
+                            code: Vec::new(),
+                            constants: Vec::new(),
+                        },
+                        upvalue_count: 0,
+                    }));
+
+                    let parent = Rc::new(RefCell::new(self.clone()));
+                    let nested = Rc::new(RefCell::new(Compiler {
+                        source: self.source.clone(),
+                        ast: method.body.clone(),
+                        globals: self.globals.clone(),
+                        context: CompilerContext {
+                            function: function.clone(),
+                            upvalues: vec![],
+                            scopes: vec![HashMap::new()],
+                            is_global_scope: false,
+                            next_slot: 0,
+                        },
+                        enclosing: Some(parent),
+                        loop_stack: Vec::new(),
+                        type_defs: self.type_defs.clone(),
+                        methods: self.methods.clone(),
+                    }));
+
+                    for (param_name, _) in &method.params {
+                        nested.borrow_mut().context.declare_local(param_name);
+                    }
+
+                    nested.borrow_mut().context.begin_scope();
+                    nested.borrow_mut().compile_stmts(&method.body)?;
+                    nested.borrow_mut().context.end_scope();
+
+                    let index = nested.borrow_mut().add_constant(Value::Umbra);
+                    nested.borrow_mut().emit(Op::Constant(index));
+                    nested.borrow_mut().emit(Op::Return);
+
+                    let value = Value::Function(function.clone());
+                    self.methods
+                        .insert((facet_name.clone(), method.name.clone()), value);
+                }
+            }
+
             Stmt::FnDecl {
                 name,
                 arity,
@@ -159,12 +224,25 @@ impl Compiler {
                 params,
                 ..
             } => {
-                if self.context.resolve_local(name).is_some() || self.globals.contains_key(name) {
+                if self.globals.contains_key(name) {
                     return Err(PrismError::compile_error(
                         format!("Function '{}' already declared in this scope", name),
                         &stmt.span,
                         &get_source_line(&self.source, stmt.span.line),
                     ));
+                }
+
+                if let Some(slot) = self.context.resolve_local(name) {
+                    match self.context.function.borrow().chunk.constants[slot] {
+                        Value::Function(_) => {
+                            return Err(PrismError::compile_error(
+                                format!("Function '{}' already declared in this scope", name),
+                                &stmt.span,
+                                &get_source_line(&self.source, stmt.span.line),
+                            ));
+                        }
+                        _ => {}
+                    }
                 }
 
                 let slot = if self.context.is_global_scope {
@@ -199,6 +277,7 @@ impl Compiler {
                     enclosing: Some(parent),
                     loop_stack: Vec::new(),
                     type_defs: self.type_defs.clone(),
+                    methods: self.methods.clone(),
                 }));
 
                 for (param_name, _) in params.iter() {
@@ -631,6 +710,19 @@ impl Compiler {
                 }
             }
 
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                self.compile_expr(receiver)?;
+                self.emit(Op::GetMethod(method.clone()));
+                for arg in args {
+                    self.compile_expr(arg)?;
+                }
+                self.emit(Op::Call(args.len() + 1));
+            }
+
             Expr::Call { callee, args } => {
                 if let Expr::Identifier(name) = &callee.node {
                     let expected_arity = match self.globals.get(name) {
@@ -699,6 +791,7 @@ impl Compiler {
                     enclosing: Some(parent),
                     loop_stack: vec![],
                     type_defs: self.type_defs.clone(),
+                    methods: self.methods.clone(),
                 }));
 
                 for (param_name, _) in params.iter() {

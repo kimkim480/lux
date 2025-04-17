@@ -1,4 +1,6 @@
-use crate::ast::{BinaryOp, Expr, LogicalOp, Precedence, Span, Spanned, Stmt, Type, UnaryOp};
+use crate::ast::{
+    BinaryOp, Expr, LogicalOp, MethodSig, Precedence, Span, Spanned, Stmt, Type, UnaryOp,
+};
 use crate::constants;
 use crate::error::ParseError;
 use crate::lexer::Lexer;
@@ -232,6 +234,42 @@ impl<'a> Parser<'a> {
                 span_start,
             ))
         }
+    }
+
+    fn parse_method_call(&mut self, receiver: Spanned<Expr>) -> Result<Spanned<Expr>, ParseError> {
+        let name = match &self.peek().kind {
+            TokenKind::Identifier(n) => n.clone(),
+            _ => {
+                return Err(ParseError::new(
+                    "Expected method name after '::'",
+                    &self.filename,
+                    self.peek(),
+                ));
+            }
+        };
+        self.advance(); // consume identifier
+
+        self.consume_token(TokenKind::LeftParen, "Expected '(' after method name")?;
+        let mut args = Vec::new();
+        if !self.match_token(&TokenKind::RightParen) {
+            loop {
+                args.push(self.parse_expr()?);
+                if !self.match_token(&TokenKind::Comma) {
+                    self.consume_token(TokenKind::RightParen, "Expected ')' after arguments")?;
+                    break;
+                }
+            }
+        }
+
+        let span = receiver.span.clone();
+        Ok(Spanned::new(
+            Expr::MethodCall {
+                receiver: Box::new(receiver),
+                method: name,
+                args,
+            },
+            span,
+        ))
     }
 
     fn parse_call(&mut self, callee: Spanned<Expr>) -> Result<Spanned<Expr>, ParseError> {
@@ -748,6 +786,119 @@ impl<'a> Parser<'a> {
         Ok(Spanned::new(Stmt::LetDecl { name, ty, value }, span))
     }
 
+    fn parse_radiate_decl(&mut self) -> Result<Spanned<Stmt>, ParseError> {
+        self.advance(); // consume ‘Radiate’
+
+        let span = Span {
+            filename: self.filename.clone(),
+            line: self.previous.line,
+            column: self.previous.column,
+        };
+
+        let facet_name = match &self.advance().kind {
+            TokenKind::Identifier(name) => name.clone(),
+            _ => {
+                return Err(ParseError::new(
+                    "Expected facet name after 'Radiate'",
+                    &self.filename,
+                    self.peek(),
+                ));
+            }
+        };
+
+        self.consume_token(TokenKind::LeftBrace, "Expected '{' after facet name")?;
+
+        let mut methods = Vec::new();
+
+        while !self.match_token(&TokenKind::RightBrace) {
+            methods.push(self.parse_method(&facet_name)?);
+        }
+
+        Ok(Spanned::new(
+            Stmt::RadiateDecl {
+                facet_name,
+                methods,
+            },
+            span,
+        ))
+    }
+
+    fn parse_method(&mut self, facet_name: &String) -> Result<MethodSig, ParseError> {
+        let name = match &self.peek().kind {
+            TokenKind::Identifier(n) => n.clone(),
+            _ => {
+                return Err(ParseError::new(
+                    "Expected method name",
+                    &self.filename,
+                    self.peek(),
+                ));
+            }
+        };
+
+        self.advance(); // consume method name
+
+        self.consume_token(TokenKind::LeftParen, "Expected '(' after method name")?;
+        let mut params = Vec::new();
+        if !self.match_token(&TokenKind::RightParen) {
+            let mut first = true;
+            loop {
+                let name_tok = self.advance(); //  consume identifier
+
+                let param_name = if let TokenKind::Identifier(n) = &name_tok.kind {
+                    n.clone()
+                } else {
+                    return Err(ParseError::new(
+                        "Expected parameter name",
+                        &self.filename,
+                        self.peek(),
+                    ));
+                };
+
+                let mut ty = Type::Named(facet_name.to_string());
+                if first && param_name != "self" {
+                    params.push(("self".to_string(), ty.clone()));
+                }
+
+                if !(first && param_name == "self") {
+                    self.consume_token(TokenKind::Colon, "Expected ':' after parameter")?;
+                    ty = self.parse_type()?;
+                }
+
+                first = false;
+
+                params.push((param_name, ty));
+
+                if !self.match_token(&TokenKind::Comma) {
+                    self.consume_token(TokenKind::RightParen, "Expected ')' after parameters")?;
+                    break;
+                }
+            }
+        }
+
+        if params.is_empty() {
+            params.push(("self".to_string(), Type::Named(facet_name.to_string())));
+        }
+
+        let arity = params.len();
+
+        let return_type = if self.match_token(&TokenKind::Arrow) {
+            self.parse_type()?
+        } else {
+            Type::Umbra
+        };
+
+        self.consume_token(TokenKind::LeftBrace, "Expected '{' before method body")?;
+        let body = self.parse_block()?;
+
+        Ok(MethodSig {
+            name,
+            params,
+            arity,
+            body,
+            return_type,
+        })
+    }
+
     fn parse_refraction_decl(&mut self) -> Result<Spanned<Stmt>, ParseError> {
         self.advance(); // consume 'Refraction'
 
@@ -942,6 +1093,7 @@ impl<'a> Parser<'a> {
             TokenKind::Const => self.parse_const(),
             TokenKind::Let => self.parse_let(),
             TokenKind::Refraction => self.parse_refraction_decl(),
+            TokenKind::Radiate => self.parse_radiate_decl(),
             TokenKind::Fn => self.parse_fn(),
             TokenKind::If => self.parse_if(),
             TokenKind::For => self.parse_for(),
@@ -1191,6 +1343,11 @@ impl<'a> Parser<'a> {
                 prefix: None,
                 infix: Some(Parser::parse_arithmetic_assignment),
                 precedence: Precedence::Assignment,
+            },
+            ColonColon => ParseRule {
+                prefix: None,
+                infix: Some(Parser::parse_method_call),
+                precedence: Precedence::Call,
             },
             LeftParen => ParseRule {
                 prefix: Some(Parser::parse_grouping),

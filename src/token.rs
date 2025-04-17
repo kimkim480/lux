@@ -17,6 +17,7 @@ pub enum TokenKind {
     RightBrace,   // }
 
     // One or two character tokens
+    ColonColon,   // ::
     PlusEqual,    // +=
     MinusEqual,   // -=
     StarEqual,    // *=
@@ -58,6 +59,7 @@ pub enum TokenKind {
     Break,
     Continue,
     Refraction,
+    Radiate,
     Facet,
     Interface,
     Import,
@@ -75,4 +77,22 @@ pub struct Token {
     pub kind: TokenKind,
     pub line: usize,
     pub column: usize,
+}
+
+impl Token {
+    pub fn new(kind: TokenKind, line: usize, column: usize) -> Self {
+        Token { kind, line, column }
+    }
+}
+
+impl std::fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} at {}:{}", self.kind, self.line, self.column)
+    }
 }

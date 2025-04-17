@@ -95,6 +95,7 @@ pub enum Op {
         upvalues: Vec<(bool, usize)>, // (is_local, index)
     },
     Call(usize),
+    GetMethod(String),
     JumpIfFalse(usize),
     Jump(usize),
     MakeArray(usize), // pops N values → pushes array
@@ -172,6 +173,7 @@ impl Chunk {
                 Op::Jump(offset) => {
                     println!("{:<21} {:04} -> {:04}", "Jump", ip, offset)
                 }
+                Op::GetMethod(method) => println!("{:<21} {}", "GetMethod", method),
                 Op::Call(arity) => println!("{:<21} {}", "Call", arity),
                 Op::MakeArray(arity) => println!("{:<21} {}", "MakeArray", arity),
                 Op::ArrayGet => println!("{:<21}", "ArrayGet"),

@@ -48,6 +48,7 @@ fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut prism = Prism::new();
     prism.debug_trace = debug;
     prism.globals = compiler.borrow().globals.clone();
+    prism.methods = compiler.borrow().methods.clone();
     prism.facet_layouts = compiler
         .borrow()
         .type_defs
