@@ -6,29 +6,27 @@
 
 ## What is Lux?
 
-- **Lux** is a statically typed, stack-based programming language designed for learning and exploration.
-- It is built from scratch in **Rust** with a custom virtual machine called **Prism**.
+- **Lux** is a statically typed, stack‑based programming language designed for learning and exploration.
+- It is built from scratch in **Rust** with a custom virtual machine called **Prism** (⚠️ _under active development_).
 - Its purpose: to shine light through the chaos of runtime errors — with clarity, intention, and precision.
-
-## Goals of Lux
-
-- **Clarity** over cleverness
-- **Static typing** from the ground up
-- **Minimalist syntax**, inspired by light and structure
-- Built to **learn**, not necessarily to ship
 
 ---
 
-## ✨ Features
+## ✨ Current Features
 
-- 🧠 Statically typed with `Light`, `Lumens`, `Photon`, `Umbra`
-- 🔁 Control flow: `for`, `if`/`else`, `switch`, `break`, `continue`
-- 🧮 Arithmetic, logic, and comparison operators
-- 🧱 Facets (structs) and type aliases (`Refraction`)
-- 🧵 Function declarations, closures, and return values
-- 📦 Arrays with method-style operations (`push`, `pop`, indexing)
-- 🔦 Function types (`Function([T], T)` or `(T) -> T`) for higher-order programming
-- 🌌 Modular system using `Constellation` and `import`
+| Status | Feature                                                          | Notes                                                                                  |
+| ------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| ✅     | **Static type system** with `Light`, `Lumens`, `Photon`, `Umbra` |                                                                                        |
+| ✅     | Control flow: `for`, `if / else`, `switch`, `break`, `continue`  |                                                                                        |
+| ✅     | Arithmetic, logic and comparison operators                       |                                                                                        |
+| ✅     | **Facets** (structs) and type aliases (**Refraction**)           |                                                                                        |
+| ✅     | Function declarations, closures, and explicit return types       |                                                                                        |
+| ✅     | Arrays with **indexing** (`xs[0]`)                               | `push`/`pop` methods are on the roadmap                                                |
+| ✅     | Higher‑order functions via `Function([T], T)` syntax             |                                                                                        |
+| 🛠️     | Modular system using `Constellation` and `import`                | Parser recognizes `constellation`, but module/import semantics are not implemented yet |
+| 🛠️     | Stand‑alone **Prism** CLI to run compiled byte‑code              | For now, `lux` compiles _and_ runs code                                                |
+
+> _Planned features are marked with the wrench (🛠️) icon._
 
 ---
 
@@ -45,71 +43,56 @@
 
 ---
 
-## 🧪 Examples
+## 🚀 Quick Tour
 
 ```lux
-// Numeric and string
+// Declare values
 let x: Light = 42;
 let name: Lumens = "Lux";
 
 // Boolean logic
-let isBright: Photon = true && false;
+let ok: Photon = true && !false;
 
-// Array
-let numbers: [Light] = [1, 2, 3, 4];
-emit numbers[2]; // emits 3
+// Arrays
+let nums: [Light] = [1, 2, 3];
+emit nums[1]; // → 2
 
-// Function type (Lambda)
-let greet: () -> Umbra = fn() {
-  emit "Hello from Lux!";
-};
-greet();
-
-// Function definition
+// Functions
 fn add(a: Light, b: Light) -> Light {
   return a + b;
 }
-let sum: Light = add(1, 2);
+let sum: Light = add(3, 4);
 
-// Facet (struct)
+// Facets (struct‑like)
 Refraction Point Facet {
   x Light
   y Light
-};
-
+}
 let p: Point = Point { x: 3, y: 4 };
-emit p.x + p.y; // emits 7
-
-// Type alias
-Refraction Lambda Function([Light, Light], Light)
-
-let add: Lambda = fn(a: Light, b: Light) -> Light {
-  return a + b;
-};
-
-let sum: Light = add(1, 2);
+emit p.x + p.y; // → 7
 ```
 
 ---
 
 ## 🛠 Installation
 
-You’ll need [Rust](https://www.rust-lang.org/tools/install) installed. Then:
+> You need [Rust](https://www.rust-lang.org/tools/install) installed.
 
 ```bash
 cargo install lux-lang
 ```
 
-This will install two CLI tools:
+This command installs **one** executable for now:
 
-- `lux` – the compiler (produces bytecode)
-- `prism` – the virtual machine (runs bytecode)
+- `lux` – _compiler **and** interpreter_ (runs code directly)
+
+A separate `prism` CLI that runs byte‑code is planned, but not yet available.
 
 ---
 
-## 🚀 Getting Started
+## 🏃‍♂️ Running Your First Program
 
-Create a file called `hello.lux`:
+Create a file named **hello.lux**:
 
 ```lux
 constellation main;
@@ -119,19 +102,16 @@ fn Prism() {
 }
 ```
 
-Then compile and run it:
+Then run:
 
 ```bash
 lux hello.lux
 ```
 
-Or compile and run it with Prism manually:
+That’s it! The `lux` tool will compile your code, execute it, and print the output.
 
-```bash
-lux hello.lux -o hello.prism
-prism hello.prism
-```
+> Byte‑code output (`-o <file>.prism`) and the stand‑alone `prism` runner will be documented once available.
 
 ---
 
-Made with ☀️ — _Post Tenebras Lux_
+Made with ☀️ — _Post Tenebras Lux_
