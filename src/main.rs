@@ -25,10 +25,41 @@ fn main() {
 }
 
 fn try_main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = env::args().skip(1);
-    let filename = args.next().ok_or("Usage: prism <filename>")?;
-    let debug = args.any(|arg| arg == "--debug");
+    // TODO: Use clap for argument parsing
+    // collect arguments (excluding program name)
+    let args: Vec<String> = env::args().skip(1).collect();
+    // flags
+    let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
+    let version = args.iter().any(|arg| arg == "--version" || arg == "-v");
+    let help = args.iter().any(|arg| arg == "--help" || arg == "-h");
 
+    // version request: print version and exit
+    if version {
+        println!("Lux v0.0.1-alpha.1");
+        return Ok(());
+    }
+
+    // help or no args: print usage and exit
+    if help || args.is_empty() {
+        println!("Usage: lux <filename>");
+        println!("Options:");
+        println!("  --debug, -d    Enable debug mode (lux <filename> -d)");
+        println!("  --version, -v  Show version information");
+        println!("  --help, -h     Show this help message");
+        return Ok(());
+    }
+
+    // first non-flag argument is filename; if missing, show help
+    let filename = if let Some(f) = args.iter().find(|arg| !arg.starts_with('-')) {
+        f
+    } else {
+        println!("Usage: lux <filename>");
+        println!("Options:");
+        println!("  --debug, -d    Enable debug mode (lux <filename> -d)");
+        println!("  --version, -v  Show version information");
+        println!("  --help, -h     Show this help message");
+        return Ok(());
+    };
     let source = fs::read_to_string(&filename)
         .map_err(|e| format!("Could not read file '{}': {}", filename, e))?;
 

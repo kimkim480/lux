@@ -101,7 +101,7 @@ impl TypeChecker {
                     ..
                 } => {
                     let fn_type = self.resolve_fn_signature(params, return_type)?;
-                    self.globals.insert(name.clone(), fn_type);
+                    self.define_global(name, fn_type);
                 }
                 _ => {}
             }
@@ -130,22 +130,21 @@ impl TypeChecker {
                         &get_source_line(&self.source, stmt.span.line),
                     ));
                 }
-                self.define(name, expected);
+                self.define_local(name, expected);
             }
 
             Stmt::LetDecl { name, ty, value } => {
-                // TODO move this to define
-                if let Some(existing) = self.globals.get(name) {
-                    if matches!(existing, LuxType::Function(_, _)) {
-                        return Err(PrismError::type_error(
-                            format!("Cannot redefine function '{}' in local scope", name),
-                            &stmt.span,
-                            &get_source_line(&self.source, stmt.span.line),
-                        ));
-                    }
+                if self.lookup_local(name).is_some() {
+                    return Err(PrismError::type_error(
+                        format!("Cannot redefine variable '{}' in local scope", name),
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
                 }
+
                 let expected = self.resolve_type_hint(ty)?;
                 let actual = self.check_expr(value)?;
+
                 if expected != actual {
                     return Err(PrismError::type_error(
                         format!(
@@ -156,7 +155,7 @@ impl TypeChecker {
                         &get_source_line(&self.source, stmt.span.line),
                     ));
                 }
-                self.define(name, expected);
+                self.define_local(name, expected);
             }
 
             Stmt::FacetDecl { .. } => {}
@@ -296,8 +295,15 @@ impl TypeChecker {
                 return_type,
                 ..
             } => {
+                if self.lookup_local(name).is_some() {
+                    return Err(PrismError::type_error(
+                        format!("Cannot redefine function '{}' in local scope", name),
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
+                }
                 let fn_type = self.resolve_fn_signature(params, return_type)?;
-                self.define(name, fn_type.clone());
+                self.define_local(name, fn_type.clone());
 
                 let prev = self.expected_return.clone();
                 self.expected_return = Some(self.resolve_type_hint(return_type)?);
@@ -306,7 +312,7 @@ impl TypeChecker {
 
                 for (param_name, param_type) in params {
                     let ty = self.resolve_type_hint(param_type)?;
-                    self.define(param_name, ty);
+                    self.define_local(param_name, ty);
                 }
 
                 // track whether a return actually happened
@@ -411,7 +417,7 @@ impl TypeChecker {
 
                 for (name, ty) in params {
                     let resolved = self.resolve_type_hint(ty)?;
-                    self.define(name, resolved.clone());
+                    self.define_local(name, resolved.clone());
                     param_types.push(resolved);
                 }
 
@@ -430,9 +436,9 @@ impl TypeChecker {
                 Ok(LuxType::Function(param_types, Box::new(return_ty)))
             }
 
-            Expr::Identifier(name) => self.lookup(&name, &expr.span),
+            Expr::Identifier(name) => self.lookup_scopes(&name, &expr.span),
             Expr::Assign { name, value } => {
-                let expected = self.lookup(name, &expr.span)?;
+                let expected = self.lookup_scopes(name, &expr.span)?;
                 let actual = self.check_expr(value)?;
 
                 if expected != actual {
@@ -449,7 +455,7 @@ impl TypeChecker {
                 Ok(expected)
             }
             Expr::AssignOp { name, op, value } => {
-                let lhs = self.lookup(name, &expr.span)?;
+                let lhs = self.lookup_scopes(name, &expr.span)?;
                 let rhs = self.check_expr(value)?;
 
                 if lhs != LuxType::Light || rhs != LuxType::Light {
@@ -461,6 +467,20 @@ impl TypeChecker {
                 }
 
                 Ok(LuxType::Light)
+            }
+            Expr::Logical { left, op, right } => {
+                let left_ty = self.check_expr(left)?;
+                let right_ty = self.check_expr(right)?;
+
+                if left_ty != LuxType::Photon || right_ty != LuxType::Photon {
+                    return Err(PrismError::type_error(
+                        format!("Logical operator '{}' requires Photon types", op),
+                        &expr.span,
+                        &get_source_line(&self.source, expr.span.line),
+                    ));
+                }
+
+                Ok(LuxType::Photon)
             }
             Expr::AssignIndex {
                 array,
@@ -758,7 +778,6 @@ impl TypeChecker {
                     )),
                 }
             }
-
             _ => Ok(LuxType::Umbra), // placeholder fallback
         }
     }
@@ -832,11 +851,19 @@ impl TypeChecker {
         Ok(LuxType::Function(param_types, Box::new(ret_ty)))
     }
 
-    fn define(&mut self, name: &str, ty: LuxType) {
+    fn define_local(&mut self, name: &str, ty: LuxType) {
         self.locals.last_mut().unwrap().insert(name.to_string(), ty);
     }
 
-    fn lookup(&self, name: &str, span: &Span) -> Result<LuxType, PrismError> {
+    fn lookup_local(&self, name: &str) -> Option<&LuxType> {
+        self.locals.last().unwrap().get(name)
+    }
+
+    fn define_global(&mut self, name: &str, ty: LuxType) {
+        self.globals.insert(name.to_string(), ty);
+    }
+
+    fn lookup_scopes(&self, name: &str, span: &Span) -> Result<LuxType, PrismError> {
         for scope in self.locals.iter().rev() {
             if let Some(ty) = scope.get(name) {
                 return Ok(ty.clone());

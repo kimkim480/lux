@@ -13,7 +13,7 @@ Refraction Circle Facet {
 }
 
 Radiate Circle {
-  area() -> Light {
+  area(self) -> Light {
     return PI * self.radius * self.radius;
   }
 
@@ -21,35 +21,45 @@ Radiate Circle {
   new(radius: Light) -> Circle {
     return Circle { radius: radius };
   }
+
+  hello(word: Lumens) -> Lumens {
+    return word;
+  }
 }
 
 Refraction fn_return Function([[Light]], Light)
 
 fn Prism() {
 
-  emit "---------AREA---------";
+  // emit "---------AREA---------";
   let c1: Circle = Circle { radius: 3.0 };
+
   emit c1::area(); // 28.274333882308138
-  emit "----------------------";
+  emit c1::hello("Opaaaaa");
+  // emit Circle::new(4.0);
 
-  let blue: Light = 1;
+  // emit "----------------------";
+
+  // let blue: Light = 1;
   
-  fn x() -> fn_return {
-    let xs: [Light] = [1, 0];
+  // fn x() -> fn_return {
+  //   let xs: [Light] = [1, 0];
 
-    fn inner(xs: [Light]) -> Light {
-      return xs[0];
-    }
+  //   fn inner(xs: [Light]) -> Light {
+  //     return xs[0];
+  //   }
 
-    return inner;
-  }
+  //   return inner;
+  // }
 
-  let p: Point = Point { x: 1, y: 2 };
-  let x: Light = p.x;
+  // x();
+
+  // let p: Point = Point { x: 1, y: 2 };
+  // let point_x: Light = p.x;
   
-  let y: Light = 1 + 1;
+  // let y: Light = 1 + 1;
   
-  emit p; // { x: 1, y: 2 }
-  emit p.x; // 1
-  emit p.y; // 2
+  // emit p; // { x: 1, y: 2 }
+  // emit point_x; // 1
+  // emit p.y; // 2
 }

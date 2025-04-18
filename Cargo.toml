@@ -1,6 +1,24 @@
 [package]
-name = "lux"
-version = "0.0.1"
+name = "lux-lang"
+version = "0.0.1-alpha.1"
 edition = "2024"
+rust-version = "1.85.0"
+authors = ["Eric Camara <lordkim480@gmail.com>"]
+description = "The Lux programming language"
+license = "Apache-2.0"
+repository = "https://github.com/kimkim480/lux"
+readme = "README.md"
+keywords = [
+  "language",
+  "interpreter",
+  "stack-based",
+  "educational",
+  "virtual-machine",
+]
+categories = ["compilers", "virtualization"]
+
+[[bin]]
+name = "lux"
+path = "src/main.rs"
 
 [dependencies]

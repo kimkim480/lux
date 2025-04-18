@@ -1,9 +1,16 @@
 constellation bugs
 
+
 fn Prism() {
-  fn Prism() {
-    // emit "hello";
-    let foo: Light = 1;
-    fn foo() -> Umbra { }
-  }
+  emit "hello";
+
+  // let foo: Light = 1;
+
+  fn foo() -> Umbra { }
+
+  emit foo;
 }
+
+// 💥 Compile error: Variable 'foo' already declared in this scope
+//  → test/bugs.lux:8:8
+//  8 |     let foo: Light = 1;

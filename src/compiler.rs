@@ -102,21 +102,12 @@ impl Compiler {
                     ));
                 }
 
-                if let Some(slot) = self.context.resolve_local(name) {
-                    println!(
-                        "slot: {:?}",
-                        self.context.function.borrow().chunk.constants[slot]
-                    );
-                    match self.context.function.borrow().chunk.constants[slot] {
-                        Value::Function(_) => {}
-                        _ => {
-                            return Err(PrismError::compile_error(
-                                format!("Variable '{}' already declared in this scope", name),
-                                &stmt.span,
-                                &get_source_line(&self.source, stmt.span.line),
-                            ));
-                        }
-                    }
+                if let Some(_) = self.context.resolve_local(name) {
+                    return Err(PrismError::compile_error(
+                        format!("Variable '{}' already declared in this scope", name),
+                        &stmt.span,
+                        &get_source_line(&self.source, stmt.span.line),
+                    ));
                 }
 
                 Self::compile_expr(self, value)?;
@@ -224,25 +215,12 @@ impl Compiler {
                 params,
                 ..
             } => {
-                if self.globals.contains_key(name) {
+                if self.context.resolve_local(name).is_some() || self.globals.contains_key(name) {
                     return Err(PrismError::compile_error(
                         format!("Function '{}' already declared in this scope", name),
                         &stmt.span,
                         &get_source_line(&self.source, stmt.span.line),
                     ));
-                }
-
-                if let Some(slot) = self.context.resolve_local(name) {
-                    match self.context.function.borrow().chunk.constants[slot] {
-                        Value::Function(_) => {
-                            return Err(PrismError::compile_error(
-                                format!("Function '{}' already declared in this scope", name),
-                                &stmt.span,
-                                &get_source_line(&self.source, stmt.span.line),
-                            ));
-                        }
-                        _ => {}
-                    }
                 }
 
                 let slot = if self.context.is_global_scope {
@@ -715,11 +693,11 @@ impl Compiler {
                 method,
                 args,
             } => {
-                self.compile_expr(receiver)?;
-                self.emit(Op::GetMethod(method.clone()));
                 for arg in args {
                     self.compile_expr(arg)?;
                 }
+                self.compile_expr(receiver)?;
+                self.emit(Op::GetMethod(method.clone()));
                 self.emit(Op::Call(args.len() + 1));
             }
 

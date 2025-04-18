@@ -97,7 +97,7 @@ let sum: Light = add(1, 2);
 You’ll need [Rust](https://www.rust-lang.org/tools/install) installed. Then:
 
 ```bash
-cargo install lux
+cargo install lux-lang
 ```
 
 This will install two CLI tools:
