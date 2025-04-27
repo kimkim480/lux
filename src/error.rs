@@ -1,6 +1,9 @@
+use colored::{Color, Colorize};
+
+use std::cmp::max;
 use std::fmt;
 
-use crate::{ast::Span, token::TokenKind};
+use crate::syntax::{Span, Token};
 
 pub type PrismResult<T> = Result<T, PrismError>;
 
@@ -68,19 +71,22 @@ impl PrismError {
 pub struct ParseError {
     pub filename: String,
     pub message: String,
-    pub line: usize,
-    pub column: usize,
-    pub kind: TokenKind,
+    pub token: Token,
+    pub source_line: String,
 }
 
 impl ParseError {
-    pub fn new(message: impl Into<String>, filename: &str, token: &crate::token::Token) -> Self {
+    pub fn new(
+        message: impl Into<String>,
+        filename: &str,
+        token: &Token,
+        source_line: &str,
+    ) -> Self {
         ParseError {
             filename: filename.to_string(),
             message: message.into(),
-            line: token.line,
-            column: token.column,
-            kind: token.kind.clone(),
+            token: token.clone(),
+            source_line: source_line.to_string(),
         }
     }
 }
@@ -89,8 +95,18 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "📍 Syntax error at {:?} {}:{}:{} → {}",
-            self.kind, self.filename, self.line, self.column, self.message
+            "{}",
+            report_error(
+                "📍 Syntax error",
+                &self.message,
+                &Span {
+                    filename: self.filename.clone(),
+                    line: self.token.line,
+                    column_start: self.token.column_start,
+                    column: self.token.column,
+                },
+                &self.source_line
+            )
         )
     }
 }
@@ -98,20 +114,33 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 fn report_error(label: &str, msg: &str, span: &Span, source_line: &str) -> String {
+    let error_color = Color::Red;
+    let location_color = Color::Cyan;
+    let gutter_color = Color::Blue;
+
     let line_str = span.line.to_string();
     let gutter_width = line_str.len();
 
+    let padding = span.column_start.saturating_sub(1);
+
+    let underline_len = max(1, span.column.saturating_sub(span.column_start));
+
+    let padding_str = " ".repeat(padding);
+    let underline_str = "^".repeat(underline_len);
+
     format!(
-        "{}: {}\n → {}:{}:{}\n {:>width$} | {}\n {:>width$} | {}^",
-        label,
+        "{}: {}\n {} {}\n {:>width$} {} {}\n {:>width$} {} {}{}",
+        label.color(error_color).bold(),
         msg,
-        span.filename,
-        span.line,
-        span.column,
-        span.line,
-        source_line,
+        "→".normal(),
+        format!("{}:{}:{}", &span.filename, span.line, span.column_start).color(location_color),
+        span.line.to_string().color(gutter_color),
+        "|".color(gutter_color),
+        source_line.trim_end(),
         "",
-        " ".repeat(span.column.saturating_sub(1)),
-        width = gutter_width,
+        "|".color(gutter_color),
+        &padding_str,
+        &underline_str.color(error_color).bold(),
+        width = gutter_width
     )
 }

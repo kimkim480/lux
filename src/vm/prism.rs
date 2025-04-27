@@ -1,10 +1,13 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
+    bytecode::Op,
+    codegen::MethodInfo,
     constants::{MAX_FRAMES, MAX_STACK},
     error::{PrismError, PrismResult},
-    value::{CallFrame, Closure, Op, Upvalue, Value},
 };
+
+use super::{CallFrame, Closure, Upvalue, Value, value::MapKey};
 
 #[derive(Clone)]
 pub struct Prism {
@@ -13,7 +16,7 @@ pub struct Prism {
     pub globals: HashMap<String, Value>,
     pub debug_trace: bool,
     pub facet_layouts: HashMap<String, Vec<String>>,
-    pub methods: HashMap<(String, String), Value>,
+    pub refraction_methods: HashMap<(String, String), MethodInfo>,
 }
 
 impl Prism {
@@ -24,7 +27,7 @@ impl Prism {
             globals: HashMap::new(),
             debug_trace: false,
             facet_layouts: HashMap::new(),
-            methods: HashMap::new(),
+            refraction_methods: HashMap::new(),
         }
     }
 
@@ -43,6 +46,7 @@ impl Prism {
                 Op::Mul => Value::Light(a * b),
                 Op::Div => Value::Light(a / b),
                 Op::Rem => Value::Light(a % b),
+                Op::Pow => Value::Light(a.powf(b)),
                 Op::Less => Value::Photon(a < b),
                 Op::LessEqual => Value::Photon(a <= b),
                 Op::Greater => Value::Photon(a > b),
@@ -110,14 +114,14 @@ impl Prism {
 
     pub fn run(&mut self) -> PrismResult<()> {
         loop {
-            // let prism = self.clone();
+            let prism = self.clone();
             let frame = self.frames.last_mut().unwrap();
             if frame.ip >= frame.function.borrow().chunk.code.len() {
                 break;
             }
 
             if self.debug_trace {
-                // prism.print_stack_trace();
+                prism.print_stack_trace();
 
                 frame
                     .function
@@ -143,6 +147,7 @@ impl Prism {
                 | Op::Mul
                 | Op::Div
                 | Op::Rem
+                | Op::Pow
                 | Op::Less
                 | Op::LessEqual
                 | Op::Greater
@@ -301,40 +306,35 @@ impl Prism {
                 Op::GetMethod(method_name) => {
                     let receiver = self.pop()?;
 
-                    let (facet_name, _fields) = match receiver.clone() {
-                        Value::Facet { type_name, fields } => (type_name, fields),
-                        _ => {
-                            return Err(PrismError::Runtime(format!(
-                                "Tried to call method '{}' on non‐facet value",
-                                method_name
-                            )));
-                        }
+                    let facet_name = if let Value::Facet { type_name, .. } = &receiver {
+                        type_name
+                    } else {
+                        return Err(PrismError::Runtime(format!(
+                            "Tried to call method '{method_name}' on non-facet value"
+                        )));
                     };
 
-                    let func_val = self
-                        .methods
+                    let method_info = self
+                        .refraction_methods
                         .get(&(facet_name.clone(), method_name.clone()))
                         .cloned()
                         .ok_or_else(|| {
                             PrismError::Runtime(format!(
-                                "Method '{}::{}' not found",
-                                facet_name, method_name
+                                "Method '{facet_name}::{method_name}' not found"
                             ))
                         })?;
 
-                    let function = match func_val {
-                        Value::Function(f) => f.clone(),
-                        Value::Closure(c) => c.function.clone(),
-                        _ => unreachable!("facet methods must be functions"),
-                    };
+                    match (method_info.is_static, method_info.value) {
+                        (true, method_val) => self.push(method_val)?,
+                        (false, method_val) => {
+                            self.push(receiver)?;
+                            self.push(method_val)?;
+                        }
+                    }
+                }
 
-                    let up = Rc::new(RefCell::new(Upvalue::Closed(receiver)));
-                    let method_closure = Closure {
-                        function,
-                        upvalues: vec![up],
-                    };
-
-                    self.push(Value::Closure(Rc::new(method_closure)))?;
+                Op::Invoke { method_name, arity } => {
+                    println!("{:<21} {} {}", "Invoke", method_name, arity);
                 }
 
                 Op::Call(arity) => {
@@ -404,31 +404,92 @@ impl Prism {
                     let items = self.stack.drain(start..).collect::<Vec<_>>();
                     self.push(Value::Array(Rc::new(RefCell::new(items))))?;
                 }
-                Op::ArrayGet => {
+
+                Op::ArrayIndex => {
                     let index_val = self.pop()?;
-                    let array_val = self.pop()?;
+                    let receiver_val = self.pop()?;
 
-                    let index = match index_val {
-                        Value::Light(n) if n.fract() == 0.0 => n as usize,
-                        _ => return Err(PrismError::Runtime("Invalid array index".into())),
-                    };
+                    match receiver_val {
+                        Value::Array(arr_rc) => {
+                            let index = match index_val {
+                                Value::Light(n) if n.fract() == 0.0 && n >= 0.0 => n as usize,
+                                _ => {
+                                    return Err(PrismError::Runtime(format!(
+                                        "Array index must be a non-negative integer, but got {}",
+                                        index_val
+                                    )));
+                                }
+                            };
 
-                    match array_val {
-                        Value::Array(arr) => {
-                            if index >= arr.borrow().len() {
-                                return Err(PrismError::Runtime(
-                                    "Array index out of bounds".into(),
-                                ));
+                            let arr_borrow = arr_rc.borrow();
+                            if index >= arr_borrow.len() {
+                                return Err(PrismError::Runtime(format!(
+                                    "Array index out of bounds: index is {} but length is {}",
+                                    index,
+                                    arr_borrow.len()
+                                )));
                             }
-                            self.push(arr.borrow()[index].clone())?;
+                            let element = arr_borrow[index].clone();
+                            self.push(element)?;
                         }
+
                         _ => {
-                            return Err(PrismError::Runtime(
-                                "Tried to index non-array value".into(),
-                            ));
+                            return Err(PrismError::Runtime(format!(
+                                "Cannot apply index operation to {}",
+                                receiver_val
+                            )));
                         }
                     }
                 }
+
+                Op::ArraySlice => {
+                    let index_val = self.pop()?;
+                    let receiver_val = self.pop()?;
+
+                    let Value::NumericRange { start, end } = index_val else {
+                        return Err(PrismError::Runtime(format!(
+                            "Slice operation requires a Range index, but got {}",
+                            index_val
+                        )));
+                    };
+
+                    if start.fract() != 0.0 || start < 0.0 || end.fract() != 0.0 || end < 0.0 {
+                        return Err(PrismError::Runtime(format!(
+                            "Invalid range bounds [{}..{}]. Must be non-negative integers.",
+                            start, end
+                        )));
+                    }
+                    let start_idx = start as usize;
+                    let end_idx = end as usize; // Exclusive end
+
+                    // Handle based on receiver type
+                    match receiver_val {
+                        Value::Array(arr_rc) => {
+                            let arr_borrow = arr_rc.borrow();
+                            let arr_len = arr_borrow.len();
+
+                            // Clamp indices and create slice
+                            let clamped_start = std::cmp::min(start_idx, arr_len);
+                            let clamped_end = std::cmp::min(end_idx, arr_len);
+
+                            let new_vec = if clamped_start <= clamped_end {
+                                arr_borrow[clamped_start..clamped_end].to_vec()
+                            } else {
+                                Vec::new()
+                            };
+                            let new_array_value = Value::Array(Rc::new(RefCell::new(new_vec)));
+                            self.push(new_array_value)?;
+                        }
+
+                        _ => {
+                            return Err(PrismError::Runtime(format!(
+                                "Cannot apply slice operation to {:?}",
+                                receiver_val
+                            )));
+                        }
+                    }
+                }
+
                 Op::ArraySet => {
                     let value = self.pop()?;
                     let index_val = self.pop()?;
@@ -458,6 +519,193 @@ impl Prism {
                     }
                 }
 
+                Op::StringIndex => {
+                    let index_val = self.pop()?;
+                    let receiver_val = self.pop()?;
+
+                    match receiver_val {
+                        Value::Lumens(s) => {
+                            let index = match index_val {
+                                Value::Light(n) if n.fract() == 0.0 && n >= 0.0 => n as usize,
+                                _ => {
+                                    return Err(PrismError::Runtime(format!(
+                                        "String index must be a non-negative integer, but got {}",
+                                        index_val
+                                    )));
+                                }
+                            };
+
+                            // TODO: Decide string indexing semantics: bytes or chars?
+                            // Byte access (simple, like Go)
+                            // if index >= s.len() {
+                            //     return Err(PrismError::Runtime(format!(
+                            //         "String index out of bounds: index is {} but length is {}",
+                            //         index, s.len()
+                            //     )));
+                            // }
+                            // let byte_char = s.as_bytes()[index] as char; // This might not be a valid char
+                            // self.push(Value::Lumens(byte_char.to_string()))?;
+
+                            // This is safe (for UTF-8), though chars().count() can be O(n)
+                            if let Some(ch) = s.chars().nth(index) {
+                                self.push(Value::Lumens(ch.to_string()))?;
+                            } else {
+                                return Err(PrismError::Runtime(format!(
+                                    "String index out of bounds: index is {} but char length is {}",
+                                    index,
+                                    s.chars().count()
+                                )));
+                            }
+                        }
+
+                        _ => {
+                            return Err(PrismError::Runtime(format!(
+                                "Cannot apply index operation to {}",
+                                receiver_val
+                            )));
+                        }
+                    }
+                }
+
+                Op::StringSlice => {
+                    let index_val = self.pop()?;
+                    let receiver_val = self.pop()?;
+
+                    let Value::NumericRange { start, end } = index_val else {
+                        return Err(PrismError::Runtime(format!(
+                            "Slice operation requires a Range index, but got {}",
+                            index_val
+                        )));
+                    };
+
+                    if start.fract() != 0.0 || start < 0.0 || end.fract() != 0.0 || end < 0.0 {
+                        return Err(PrismError::Runtime(format!(
+                            "Invalid range bounds [{}..{}]. Must be non-negative integers.",
+                            start, end
+                        )));
+                    }
+                    let start_idx = start as usize;
+                    let end_idx = end as usize; // Exclusive end
+
+                    match receiver_val {
+                        Value::Lumens(s) => {
+                            // TODO: Decide string slicing semantics: bytes or chars?
+                            // Byte slicing (simple, like Go)
+                            // let byte_len = s.len();
+                            // let clamped_start = std::cmp::min(start_idx, byte_len);
+                            // let clamped_end = std::cmp::min(end_idx, byte_len);
+                            // let slice_str = if clamped_start <= clamped_end {
+                            //     &s[clamped_start..clamped_end]
+                            // } else {
+                            //     ""
+                            // };
+                            // self.push(Value::Lumens(slice_str.to_string()))?;
+
+                            // This is safe (for UTF-8), though chars().count() can be O(n)
+                            let char_count = s.chars().count();
+                            let clamped_start = std::cmp::min(start_idx, char_count);
+                            let clamped_end = std::cmp::min(end_idx, char_count);
+
+                            let slice_str: String = if clamped_start <= clamped_end {
+                                s.chars()
+                                    .skip(clamped_start)
+                                    .take(clamped_end - clamped_start)
+                                    .collect()
+                            } else {
+                                String::new()
+                            };
+                            self.push(Value::Lumens(slice_str))?;
+                        }
+
+                        _ => {
+                            return Err(PrismError::Runtime(format!(
+                                "Cannot apply slice operation to {:?}",
+                                receiver_val
+                            )));
+                        }
+                    }
+                }
+
+                Op::Len => {
+                    let array_val = self.pop()?;
+                    match array_val {
+                        Value::Array(arr) => self.push(Value::Light(arr.borrow().len() as f64))?,
+                        Value::Lumens(str) => self.push(Value::Light(str.len() as f64))?,
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Tried to get length of non-array value".into(),
+                            ));
+                        }
+                    }
+                }
+
+                Op::Range => {
+                    let end = self.pop()?;
+                    let start = self.pop()?;
+
+                    let start_num = match start {
+                        Value::Light(n) => n,
+                        _ => {
+                            return Err(PrismError::Runtime(format!(
+                                "Range start must be a number, but got '{}'.",
+                                start
+                            )));
+                        }
+                    };
+                    let end_num = match end {
+                        Value::Light(n) => n,
+                        _ => {
+                            return Err(PrismError::Runtime(format!(
+                                "Range end must be a number, but got '{}'.",
+                                end
+                            )));
+                        }
+                    };
+
+                    self.push(Value::NumericRange {
+                        start: start_num,
+                        end: end_num,
+                    })?;
+                }
+
+                Op::ArrayPush => {
+                    let array_val = self.pop()?;
+                    let value = self.pop()?;
+
+                    match array_val {
+                        Value::Array(arr) => {
+                            arr.borrow_mut().push(value);
+                            self.push(Value::Umbra)?;
+                        }
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Tried to push to non-array value".into(),
+                            ));
+                        }
+                    }
+                }
+
+                Op::ArrayPop => {
+                    let array_val = self.pop()?;
+
+                    match array_val {
+                        Value::Array(arr) => {
+                            if arr.borrow().is_empty() {
+                                return Err(PrismError::Runtime(
+                                    "Tried to pop from empty array".into(),
+                                ));
+                            }
+
+                            let last = arr.borrow_mut().pop();
+                            self.push(last.unwrap())?;
+                        }
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Tried to pop from non-array value".into(),
+                            ));
+                        }
+                    }
+                }
                 Op::MakeFacet {
                     type_name,
                     field_count,
@@ -506,15 +754,65 @@ impl Prism {
                     }
                 }
 
+                Op::MakeMap(pair_count) => {
+                    if self.stack.len() < pair_count * 2 {
+                        return Err(PrismError::Runtime(format!(
+                            "Not enough values to construct map: need {} pairs, got {}",
+                            pair_count,
+                            self.stack.len()
+                        )));
+                    }
+
+                    let mut map = HashMap::with_capacity(pair_count.next_power_of_two().max(1));
+                    for _ in 0..pair_count {
+                        let value = self.pop()?;
+                        let key = self.pop()?;
+
+                        let map_key = MapKey::try_from(key)?;
+
+                        map.insert(map_key, value);
+                    }
+
+                    let map_value = Value::Map(Rc::new(RefCell::new(map)));
+
+                    self.push(map_value)?;
+                }
+
+                Op::MapGet => {
+                    let index_val = self.pop()?;
+                    let receiver_val = self.pop()?;
+
+                    match receiver_val {
+                        Value::Map(map_rc) => {
+                            let key = MapKey::try_from(index_val)?;
+                            let map_borrow = map_rc.borrow();
+                            let value = map_borrow.get(&key).ok_or_else(|| {
+                                PrismError::Runtime(format!("Key '{}' not found in map", key))
+                            })?;
+
+                            self.push(value.clone())?;
+                        }
+                        _ => {
+                            return Err(PrismError::Runtime(
+                                "Tried to get key from non-map value".into(),
+                            ));
+                        }
+                    }
+                }
+
+                Op::MapSet => {}
+
+                Op::MapDelete => {}
+
                 Op::Return => {
                     let frame = self.frames.pop().unwrap(); // 1. pop the call frame
 
                     self.close_upvalues(frame.offset); // 2. close captured vars
 
                     // 3. preserve return value from top of stack
-                    let return_value = self.stack.last().cloned().unwrap_or(Value::Umbra);
+                    let return_value = self.stack.pop().unwrap_or(Value::Umbra);
 
-                    self.stack.truncate(frame.offset + 1); // 4. remove locals + callee
+                    self.stack.truncate(frame.offset); // 4. remove locals + callee
 
                     self.push(return_value)?; // 5. push return for caller
 

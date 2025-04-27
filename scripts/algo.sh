@@ -11,6 +11,6 @@ bin="./target/debug/lux"
 for file in $(find algos -name "*.lux"); do
     echo "🧪 Testing Algos $file"
 
-    output=$($bin "$file" 2>&1 | sed 's/[[:space:]]*$//')
+    output=$($bin run "$file" 2>&1 | sed 's/[[:space:]]*$//')
     echo "$output"
 done

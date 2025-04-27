@@ -22,3 +22,5 @@ name = "lux"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4.5.37", features = ["derive"] }
+colored = "3.0.0"

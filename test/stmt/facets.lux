@@ -1,25 +1,49 @@
-// skip
-constellation face_tests
+constellation facet_tests
 
 Refraction Point Facet {
   x Light
   y Light
 }
 
-const p: Point = Point { x: 3, y: 4 };
+Radiate Point {
+  distance_from_origin() -> Light {
+    return (self.x ** 2 + self.y ** 2) ** 0.5;
+  }
+
+  distance_to(other: Point) -> Light {
+    return self::distance_from_origin() + other::distance_from_origin();
+  }
+
+  @static
+  new(x: Light, y: Light) -> Point {
+    return Point { x: x, y: y };
+  }
+
+}
+
+const pLiteral: Point = Point { x: 3, y: 4 };
 
 fn Prism() {
+  let pStatic: Point = Point::new(5, 10);
+  let pStatic2: Point = Point::new(10, 10);
+
+  emit pStatic::distance_to(pStatic2);
+
   emit "--- facet literal ---";
-  emit p;         // test: <Point {x: 3, y: 4}>
-  emit p.x;       // test: <3>
-  emit p.y;       // test: <4>
+  emit pLiteral;         // test: <Point {x: 3, y: 4}>
+  emit pLiteral.x;       // test: <3>
+  emit pLiteral.y;       // test: <4>
 
   emit "--- field access and math ---";
-  let doubleX: Light = p.x * 2;
+  let doubleX: Light = pLiteral.x * 2;
   emit doubleX;    // test: <6>
 
+  emit "--- methods ---";
+  emit pStatic::distance_from_origin(); // test: <11.180339887498949>
+  emit pLiteral::distance_from_origin(); // test: <5>
+
   emit "--- facet inside function ---";
-  show(p);
+  show(pLiteral);
 }
 
 fn show(pt: Point) {

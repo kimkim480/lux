@@ -17,4 +17,15 @@ fn Prism() {
   y = y + x;
   emit y; // test: <91>
 
+  let z: Light = 10;
+  z **= 2;
+  emit z;               // test: 100
+
+  emit "123"::len();    // test: 3
+
+  let s: Lumens = "Lux";
+  let sub: Lumens = s[1..2];
+  emit sub;             // test: "u"
 }
+
+

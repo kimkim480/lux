@@ -6,5 +6,5 @@ fn Prism() {
   }
   
   let bula_let: Light = bula(3);
-  emit bula; // test: <3>
+  emit bula_let; // test: <3>
 }  

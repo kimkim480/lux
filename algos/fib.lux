@@ -9,6 +9,5 @@ fn fib(n: Light) -> Light {
 }
 
 fn Prism() {
-  emit fib(5);  // test: <5>
-  emit fib(10); // test: <55>
+  emit fib(10);
 }

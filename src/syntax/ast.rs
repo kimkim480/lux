@@ -1,55 +1,25 @@
 use core::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use crate::{tir::ExprId, types::LuxType};
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Span {
     pub filename: String,
     pub line: usize,
     pub column: usize,
+    pub column_start: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spanned<T> {
+    pub id: ExprId,
     pub node: T,
     pub span: Span,
 }
 
 impl<T> Spanned<T> {
-    pub fn new(node: T, span: Span) -> Self {
-        Self { node, span }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Type {
-    Light,
-    Lumens,
-    Umbra,
-    Photon,
-    Array(Box<Type>),
-    Named(String), // for user-defined types
-    Facet(String, Vec<(String, Type)>),
-    Function(Vec<Type>, Box<Type>),
-}
-
-impl fmt::Display for Type {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Type::Light => write!(f, "Light"),
-            Type::Photon => write!(f, "Photon"),
-            Type::Lumens => write!(f, "Lumens"),
-            Type::Umbra => write!(f, "Umbra"),
-            Type::Array(inner) => write!(f, "Array<{}>", inner),
-            Type::Named(name) => write!(f, "{}", name),
-            Type::Facet(name, _) => write!(f, "{}", name),
-            Type::Function(params, ret) => {
-                let params_str = params
-                    .iter()
-                    .map(|t| format!("{}", t))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "Function({}) -> {}", params_str, ret)
-            }
-        }
+    pub fn new(id: ExprId, node: T, span: Span) -> Self {
+        Self { id, node, span }
     }
 }
 
@@ -58,6 +28,7 @@ pub enum BinaryOp {
     Plus,         // +
     Minus,        // -
     Star,         // *
+    StarStar,     // **
     Slash,        // /
     Percent,      // %
     EqualEqual,   // ==
@@ -74,6 +45,7 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Plus => write!(f, "+"),
             BinaryOp::Minus => write!(f, "-"),
             BinaryOp::Star => write!(f, "*"),
+            BinaryOp::StarStar => write!(f, "**"),
             BinaryOp::Slash => write!(f, "/"),
             BinaryOp::Percent => write!(f, "%"),
             BinaryOp::EqualEqual => write!(f, "=="),
@@ -116,45 +88,13 @@ impl fmt::Display for UnaryOp {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd)]
-pub enum Precedence {
-    None,
-    Assignment, // =
-    Or,         // ||
-    And,        // &&
-    Equality,   // ==, !=
-    Comparison, // <, >, <=, >=
-    Term,       // + -
-    Factor,     // * / %
-    Unary,      // ! -
-    Call,       // function calls
-}
-
-impl Precedence {
-    pub fn next(self) -> Precedence {
-        use Precedence::*;
-        match self {
-            None => Assignment,
-            Assignment => Or,
-            Or => And,
-            And => Equality,
-            Equality => Comparison,
-            Comparison => Term,
-            Term => Factor,
-            Factor => Unary,
-            Unary => Call,
-            Call => Call, // or Highest
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(f64),
     String(String),
     Identifier(String),
     Umbra,
-    Bool(bool),
+    Boolean(bool),
     Assign {
         name: String,
         value: Box<Spanned<Expr>>,
@@ -183,20 +123,24 @@ pub enum Expr {
         args: Vec<Spanned<Expr>>,
     },
     Lambda {
-        params: Vec<(String, Type)>,
+        params: Vec<(String, LuxType)>,
         body: Vec<Spanned<Stmt>>,
         arity: usize,
-        return_type: Type,
+        return_type: LuxType,
     },
     Array {
         elements: Vec<Spanned<Expr>>,
     },
-    ArrayGet {
-        array: Box<Spanned<Expr>>,
+    Index {
+        callee: Box<Spanned<Expr>>,
         index: Box<Spanned<Expr>>,
     },
+    Slice {
+        callee: Box<Spanned<Expr>>,
+        range: Box<Spanned<Expr>>,
+    },
     AssignIndex {
-        array: Box<Spanned<Expr>>,
+        callee: Box<Spanned<Expr>>,
         index: Box<Spanned<Expr>>,
         value: Box<Spanned<Expr>>,
     },
@@ -213,15 +157,21 @@ pub enum Expr {
         method: String,
         args: Vec<Spanned<Expr>>,
     },
+    Range {
+        start: Box<Spanned<Expr>>,
+        end: Box<Spanned<Expr>>,
+    },
+    Map(Vec<(Spanned<Expr>, Spanned<Expr>)>), // (key, value)
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MethodSig {
     pub name: String,
-    pub params: Vec<(String, Type)>, // (param_name, type)
+    pub params: Vec<(String, LuxType)>, // (param_name, type) i.e. fn(a: T) = (a, T)
     pub arity: usize,
     pub body: Vec<Spanned<Stmt>>,
-    pub return_type: Type,
+    pub return_type: LuxType,
+    pub is_static: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -232,28 +182,28 @@ pub enum Stmt {
     },
     ConstDecl {
         name: String,
-        ty: Type,
+        ty: LuxType,
         value: Spanned<Expr>,
     },
     FnDecl {
         name: String,
-        params: Vec<(String, Type)>,
+        params: Vec<(String, LuxType)>, // (param_name, type) i.e. fn(a: T) = (a, T)
         arity: usize,
         body: Vec<Spanned<Stmt>>,
-        return_type: Type,
+        return_type: LuxType,
     },
     LetDecl {
         name: String,
-        ty: Type,
-        value: Spanned<Expr>,
+        ty: LuxType,
+        value: Option<Spanned<Expr>>,
     },
     FacetDecl {
         name: String,
-        fields: Vec<(String, Type)>,
+        fields: Vec<(String, LuxType)>,
     },
     TypeAlias {
         name: String,
-        aliased: Type,
+        aliased: LuxType,
     },
     If {
         condition: Spanned<Expr>,
@@ -277,4 +227,15 @@ pub enum Stmt {
     Emit(Spanned<Expr>),
     Break,
     Continue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Module {
+    pub body: Vec<Spanned<Stmt>>,
+}
+
+impl Module {
+    pub fn new(body: Vec<Spanned<Stmt>>) -> Self {
+        Self { body }
+    }
 }

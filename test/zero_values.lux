@@ -1,0 +1,12 @@
+constellation main
+
+fn Prism() {
+    let n: Light; // 0
+    emit n;
+    let b: Photon; // false
+    emit b;
+    let s: Lumens; // ""
+    emit "s: " + s;
+    let arr: [Light]; // []
+    emit arr;
+}

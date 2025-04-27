@@ -6,7 +6,7 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-LUX_EXEC="./target/debug/lux"
+bin="./target/debug/lux"
 
 EXIT_CODE=0
 
@@ -21,7 +21,7 @@ run_lux_file() {
     ((TOTAL++))
     echo "▶ Running: $file"
 
-    OUTPUT=$($LUX_EXEC "$file" 2>&1)
+    OUTPUT=$($bin run "$file" 2>&1)
     STATUS=$?
 
     if [[ $STATUS -ne 0 || "$OUTPUT" == *"error:"* || "$OUTPUT" == *"Syntax error"* || "$OUTPUT" == *"Compile error"* || "$OUTPUT" == *"Runtime error"* ]]; then

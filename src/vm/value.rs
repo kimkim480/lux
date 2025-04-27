@@ -3,7 +3,41 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use crate::typechecker::LuxType;
+use crate::bytecode::Op;
+use crate::error::PrismError;
+use crate::types::LuxType;
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+pub enum MapKey {
+    Photon(bool),
+    Lumens(String),
+    Light(i64),
+}
+
+impl fmt::Display for MapKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MapKey::Photon(b) => write!(f, "{}", b),
+            MapKey::Lumens(s) => write!(f, "{}", s),
+            MapKey::Light(n) => write!(f, "{}", n),
+        }
+    }
+}
+
+impl TryFrom<Value> for MapKey {
+    type Error = PrismError;
+
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Photon(b) => Ok(MapKey::Photon(b)),
+            Value::Lumens(s) => Ok(MapKey::Lumens(s)),
+            Value::Light(n) => Ok(MapKey::Light(n.to_bits() as i64)),
+            _ => Err(PrismError::Runtime(
+                "Map keys must be Photon, Lumens, or Light".into(),
+            )),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -11,6 +45,10 @@ pub enum Value {
     Lumens(String),
     Photon(bool),
     Umbra,
+    NumericRange {
+        start: f64,
+        end: f64,
+    },
     Function(Rc<RefCell<Function>>),
     Closure(Rc<Closure>),
     Array(Rc<RefCell<Vec<Value>>>),
@@ -18,6 +56,7 @@ pub enum Value {
         type_name: String,
         fields: HashMap<String, Value>,
     },
+    Map(Rc<RefCell<HashMap<MapKey, Value>>>),
 }
 
 impl fmt::Display for Value {
@@ -49,6 +88,17 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::NumericRange { start, end } => write!(f, "{}..{}", start, end),
+            Value::Map(map) => {
+                write!(f, "{{")?;
+                for (i, (key, value)) in map.borrow().iter().enumerate() {
+                    write!(f, "{}: {}", key, value)?;
+                    if i < map.borrow().len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "}}")
+            }
         }
     }
 }
@@ -66,51 +116,7 @@ impl PartialEq for Value {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Op {
-    Constant(usize),
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Rem,
-    Not,
-    Negate,
-    Equal,
-    NotEqual,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Pop,
-    Dup,
-    GetGlobal(String),
-    SetGlobal(String),
-    GetLocal(usize),
-    SetLocal(usize),
-    GetUpvalue(usize),
-    SetUpvalue(usize),
-    Closure {
-        fn_index: usize,
-        upvalues: Vec<(bool, usize)>, // (is_local, index)
-    },
-    Call(usize),
-    GetMethod(String),
-    JumpIfFalse(usize),
-    Jump(usize),
-    MakeArray(usize), // pops N values → pushes array
-    ArrayGet,         // pops index, array → pushes value
-    ArraySet,         // pops index, value, array → sets value
-    Print,
-    Return,
-    MakeFacet {
-        type_name: String,
-        field_count: usize,
-    },
-    FieldGet(String),
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Chunk {
     pub code: Vec<Op>,
     pub constants: Vec<Value>,
@@ -126,6 +132,7 @@ impl Chunk {
                 Op::Mul => println!("{:<21}", "Mul"),
                 Op::Div => println!("{:<21}", "Div"),
                 Op::Rem => println!("{:<21}", "Rem"),
+                Op::Pow => println!("{:<21}", "Pow"),
                 Op::Not => println!("{:<21}", "Not"),
                 Op::Negate => println!("{:<21}", "Negate"),
                 Op::Equal => println!("{:<21}", "Equal"),
@@ -176,8 +183,12 @@ impl Chunk {
                 Op::GetMethod(method) => println!("{:<21} {}", "GetMethod", method),
                 Op::Call(arity) => println!("{:<21} {}", "Call", arity),
                 Op::MakeArray(arity) => println!("{:<21} {}", "MakeArray", arity),
-                Op::ArrayGet => println!("{:<21}", "ArrayGet"),
+                Op::ArrayIndex => println!("{:<21}", "Index"),
+                Op::ArraySlice => println!("{:<21}", "Slice"),
                 Op::ArraySet => println!("{:<21}", "ArraySet"),
+                Op::Len => println!("{:<21}", "Len"),
+                Op::ArrayPush => println!("{:<21}", "ArrayPush"),
+                Op::ArrayPop => println!("{:<21}", "ArrayPop"),
                 Op::Return => println!("{:<21}", "Return"),
                 Op::MakeFacet {
                     type_name,
@@ -187,6 +198,16 @@ impl Chunk {
                     println!("{:<21} {}", "MakeFacet", field_count);
                 }
                 Op::FieldGet(field) => println!("{:<21} {}", "FieldGet", field),
+                Op::Range => println!("{:<21}", "Range"),
+                Op::MakeMap(pairs) => println!("{:<21} {}", "MakeMap", pairs),
+                Op::MapGet => println!("{:<21}", "MapGet"),
+                Op::MapSet => println!("{:<21}", "MapSet"),
+                Op::MapDelete => println!("{:<21}", "MapDelete"),
+                Op::StringIndex => println!("{:<21}", "StringIndex"),
+                Op::StringSlice => println!("{:<21}", "StringSlice"),
+                Op::Invoke { method_name, arity } => {
+                    println!("{:<21} {} {}", "Invoke", method_name, arity)
+                }
             }
         } else {
             println!("(invalid ip)");
@@ -202,7 +223,7 @@ pub struct CallFrame {
     pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
     pub arity: usize,

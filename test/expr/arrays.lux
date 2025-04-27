@@ -23,5 +23,12 @@ fn Prism() {
   emit ys; // test: <[7, 2]>
   emit zs; // test: <[5, 6]>
 
+  emit "empty array"; // test: <empty array>
+  let is: [Light] = [];
+  emit is::len();      // test: <0>
+
+  is::push(1);
+  emit is;             // test: <[1]>
+
   emit "done"; // test: <done>
 }

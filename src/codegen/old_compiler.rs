@@ -1,11 +1,22 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
-    ast::{BinaryOp, Expr, LogicalOp, Spanned, Stmt},
+    bytecode::Op,
     error::{PrismError, PrismResult},
     get_source_line,
-    value::{Chunk, Function, Op, TypeDef, Value},
+    syntax::{
+        Module,
+        ast::{BinaryOp, Expr, LogicalOp, Spanned, Stmt, UnaryOp},
+    },
+    types::LuxType,
+    vm::value::{Chunk, Function, TypeDef, Value},
 };
+
+#[derive(Clone, Debug)]
+pub struct MethodInfo {
+    pub value: Value,
+    pub is_static: bool,
+}
 
 #[derive(Clone, Debug)]
 struct LoopContext {
@@ -16,18 +27,18 @@ struct LoopContext {
 
 #[derive(Clone, Debug)]
 pub struct Compiler {
-    ast: Vec<Spanned<Stmt>>,
+    module: Module,
     pub globals: HashMap<String, Value>,
     pub context: CompilerContext,
     pub enclosing: Option<Rc<RefCell<Compiler>>>,
     loop_stack: Vec<LoopContext>,
     pub type_defs: HashMap<String, TypeDef>,
-    pub methods: HashMap<(String, String), Value>,
+    pub refraction_methods: HashMap<(String, String), MethodInfo>,
     source: String,
 }
 
 impl Compiler {
-    pub fn new(source: &String, ast: Vec<Spanned<Stmt>>) -> Rc<RefCell<Self>> {
+    pub fn new(source: &String, module: Module) -> Rc<RefCell<Self>> {
         let _start = Rc::new(RefCell::new(Function {
             name: "_start".to_string(),
             arity: 0,
@@ -47,19 +58,19 @@ impl Compiler {
         };
 
         Rc::new(RefCell::new(Compiler {
-            ast,
+            module,
             globals: HashMap::new(),
             context,
             enclosing: None,
             loop_stack: Vec::new(),
             type_defs: HashMap::new(),
-            methods: HashMap::new(),
+            refraction_methods: HashMap::new(),
             source: source.clone(),
         }))
     }
 
     pub fn compile(&mut self) -> PrismResult<Rc<RefCell<Function>>> {
-        self.compile_stmts(&self.ast.clone())?;
+        self.compile_stmts(&self.module.body.clone())?;
 
         // Look for Prism() in globals
         if self.globals.contains_key("Prism") {
@@ -68,8 +79,8 @@ impl Compiler {
         } else {
             return Err(PrismError::compile_error(
                 "Prism() not found",
-                &self.ast[0].span,
-                &get_source_line(&self.source, self.ast[0].span.line),
+                &self.module.body[0].span,
+                &get_source_line(&self.source, self.module.body[0].span.line),
             ));
         }
 
@@ -93,7 +104,7 @@ impl Compiler {
         match &stmt.node {
             Stmt::ConstellationDecl(_) => {}
 
-            Stmt::LetDecl { name, value, .. } => {
+            Stmt::LetDecl { name, value, ty } => {
                 if self.context.is_global_scope {
                     return Err(PrismError::compile_error(
                         " `let` is not allowed at global scope",
@@ -110,9 +121,19 @@ impl Compiler {
                     ));
                 }
 
-                Self::compile_expr(self, value)?;
-                let slot = self.context.declare_local(name);
-                self.emit(Op::SetLocal(slot));
+                if let Some(value) = value {
+                    Self::compile_expr(self, value)?;
+                    let slot = self.context.declare_local(name, value.node.clone());
+                    self.emit(Op::SetLocal(slot));
+                } else {
+                    let zero_value = self.get_zero_value(ty);
+                    let slot = self
+                        .context
+                        .declare_local(name, Expr::Identifier(zero_value.to_string()));
+                    let index = self.add_constant(zero_value);
+                    self.emit(Op::Constant(index));
+                    self.emit(Op::SetLocal(slot));
+                }
             }
 
             Stmt::ConstDecl { name, value, .. } => {
@@ -175,7 +196,9 @@ impl Compiler {
                     let parent = Rc::new(RefCell::new(self.clone()));
                     let nested = Rc::new(RefCell::new(Compiler {
                         source: self.source.clone(),
-                        ast: method.body.clone(),
+                        module: Module {
+                            body: method.body.clone(),
+                        },
                         globals: self.globals.clone(),
                         context: CompilerContext {
                             function: function.clone(),
@@ -187,11 +210,14 @@ impl Compiler {
                         enclosing: Some(parent),
                         loop_stack: Vec::new(),
                         type_defs: self.type_defs.clone(),
-                        methods: self.methods.clone(),
+                        refraction_methods: self.refraction_methods.clone(),
                     }));
 
                     for (param_name, _) in &method.params {
-                        nested.borrow_mut().context.declare_local(param_name);
+                        nested
+                            .borrow_mut()
+                            .context
+                            .declare_local(param_name, Expr::Identifier(param_name.to_string()));
                     }
 
                     nested.borrow_mut().context.begin_scope();
@@ -203,8 +229,13 @@ impl Compiler {
                     nested.borrow_mut().emit(Op::Return);
 
                     let value = Value::Function(function.clone());
-                    self.methods
-                        .insert((facet_name.clone(), method.name.clone()), value);
+                    self.refraction_methods.insert(
+                        (facet_name.clone(), method.name.clone()),
+                        MethodInfo {
+                            value,
+                            is_static: method.is_static,
+                        },
+                    );
                 }
             }
 
@@ -226,7 +257,8 @@ impl Compiler {
                 let slot = if self.context.is_global_scope {
                     0 // dummy; not used in global scope
                 } else {
-                    self.context.declare_local(name)
+                    self.context
+                        .declare_local(name, Expr::Identifier(name.to_string()))
                 };
 
                 let function = Rc::new(RefCell::new(Function {
@@ -243,7 +275,7 @@ impl Compiler {
 
                 let nested = Rc::new(RefCell::new(Compiler {
                     source: self.source.clone(),
-                    ast: body.clone(),
+                    module: Module { body: body.clone() },
                     globals: self.globals.clone(),
                     context: CompilerContext {
                         function: function.clone(),
@@ -255,11 +287,14 @@ impl Compiler {
                     enclosing: Some(parent),
                     loop_stack: Vec::new(),
                     type_defs: self.type_defs.clone(),
-                    methods: self.methods.clone(),
+                    refraction_methods: self.refraction_methods.clone(),
                 }));
 
                 for (param_name, _) in params.iter() {
-                    nested.borrow_mut().context.declare_local(param_name);
+                    nested
+                        .borrow_mut()
+                        .context
+                        .declare_local(param_name, Expr::Identifier(param_name.to_string()));
                 }
 
                 nested.borrow_mut().context.begin_scope();
@@ -483,6 +518,57 @@ impl Compiler {
 
     fn compile_expr(&mut self, expr: &Spanned<Expr>) -> Result<(), PrismError> {
         match &expr.node {
+            Expr::Map(key_value_pairs) => {
+                for (key, value) in key_value_pairs {
+                    self.compile_expr(key)?;
+                    self.compile_expr(value)?;
+                }
+                self.emit(Op::MakeMap(key_value_pairs.len()));
+            }
+            Expr::Slice { callee, range } => {
+                self.compile_expr(callee)?;
+                self.compile_expr(range)?;
+
+                match &callee.node {
+                    Expr::Array { .. } => {
+                        self.emit(Op::ArraySlice);
+                    }
+                    Expr::String { .. } => {
+                        self.emit(Op::StringSlice);
+                    }
+                    Expr::Identifier(name) => match self.context.resolve_local(name) {
+                        Some((_, value)) => match value {
+                            Expr::String { .. } => self.emit(Op::StringSlice),
+                            Expr::Array { .. } => self.emit(Op::ArraySlice),
+                            _ => {
+                                return Err(PrismError::compile_error(
+                                    "Cannot slice non-string or non-array type",
+                                    &expr.span,
+                                    &get_source_line(&self.source, expr.span.line),
+                                ));
+                            }
+                        },
+                        None => match self.resolve_upvalue(name) {
+                            Some(index) => self.emit(Op::GetUpvalue(index)),
+                            None => self.emit(Op::GetGlobal(name.clone())),
+                        },
+                    },
+                    _ => {
+                        return Err(PrismError::compile_error(
+                            "Cannot slice non-array type",
+                            &expr.span,
+                            &get_source_line(&self.source, expr.span.line),
+                        ));
+                    }
+                }
+            }
+
+            Expr::Range { start, end } => {
+                self.compile_expr(start)?;
+                self.compile_expr(end)?;
+                self.emit(Op::Range);
+            }
+
             Expr::FacetInit { type_name, fields } => {
                 // 1. Check that the type exists
                 let expected_fields = match self.type_defs.get(type_name) {
@@ -528,18 +614,18 @@ impl Compiler {
             }
 
             Expr::AssignIndex {
-                array,
+                callee,
                 index,
                 value,
             } => {
                 // A hack that helps in cases like `arr[i] = function(arr[i]);`
                 let tmp_name = format!("__tmp__{}", self.context.next_slot);
-                let value_slot = self.context.declare_local(&tmp_name);
+                let value_slot = self.context.declare_local(&tmp_name, value.node.clone());
 
                 self.compile_expr(value)?;
                 self.emit(Op::SetLocal(value_slot));
 
-                self.compile_expr(array)?;
+                self.compile_expr(callee)?;
                 self.compile_expr(index)?;
 
                 self.emit(Op::GetLocal(value_slot));
@@ -548,14 +634,14 @@ impl Compiler {
                 self.emit(Op::GetLocal(value_slot));
             }
 
-            Expr::ArrayGet { array, index } => {
-                self.compile_expr(array)?;
+            Expr::Index { callee, index } => {
+                self.compile_expr(callee)?;
                 self.compile_expr(index)?;
-                self.emit(Op::ArrayGet);
+                self.emit(Op::ArrayIndex);
             }
 
             Expr::Identifier(name) => match self.context.resolve_local(name) {
-                Some(slot) => self.emit(Op::GetLocal(slot)),
+                Some((slot, _)) => self.emit(Op::GetLocal(slot)),
                 None => match self.resolve_upvalue(name) {
                     Some(index) => self.emit(Op::GetUpvalue(index)),
                     None => self.emit(Op::GetGlobal(name.clone())),
@@ -569,7 +655,7 @@ impl Compiler {
                 self.emit(Self::map_binary_op(op.clone()));
             }
 
-            Expr::Bool(b) => {
+            Expr::Boolean(b) => {
                 let index = self.add_constant(Value::Photon(*b));
                 self.emit(Op::Constant(index));
             }
@@ -592,8 +678,8 @@ impl Compiler {
             Expr::Unary { op, expr } => {
                 Self::compile_expr(self, expr)?;
                 match op {
-                    crate::ast::UnaryOp::Bang => self.emit(Op::Not),
-                    crate::ast::UnaryOp::Minus => self.emit(Op::Negate),
+                    UnaryOp::Bang => self.emit(Op::Not),
+                    UnaryOp::Minus => self.emit(Op::Negate),
                 }
             }
 
@@ -609,7 +695,7 @@ impl Compiler {
                 Self::compile_expr(self, value)?;
 
                 match self.context.resolve_local(name) {
-                    Some(slot) => {
+                    Some((slot, _)) => {
                         self.emit(Op::SetLocal(slot));
                         self.emit(Op::GetLocal(slot));
                     }
@@ -630,7 +716,7 @@ impl Compiler {
             }
 
             Expr::AssignOp { name, op, value } => match self.context.resolve_local(name) {
-                Some(slot) => {
+                Some((slot, _)) => {
                     self.emit(Op::GetLocal(slot));
                     Self::compile_expr(self, value)?;
                     self.emit(Self::map_binary_op(op.clone()));
@@ -696,6 +782,46 @@ impl Compiler {
                 for arg in args {
                     self.compile_expr(arg)?;
                 }
+
+                match method.as_str() {
+                    "len" => {
+                        self.compile_expr(receiver)?;
+                        self.emit(Op::Len);
+                        return Ok(());
+                    }
+                    "push" => {
+                        self.compile_expr(receiver)?;
+                        self.emit(Op::ArrayPush);
+                        return Ok(());
+                    }
+                    "pop" => {
+                        self.compile_expr(receiver)?;
+                        self.emit(Op::ArrayPop);
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+
+                if let Expr::Identifier(type_name) = &receiver.node {
+                    if let Some(TypeDef::Facet { .. }) = self.type_defs.get(type_name) {
+                        let key = (type_name.clone(), method.clone());
+                        if let Some(info) = self.refraction_methods.get(&key) {
+                            if info.is_static {
+                                let cst = self.add_constant(info.value.clone());
+                                self.emit(Op::Constant(cst));
+                                self.emit(Op::Call(args.len()));
+                                return Ok(());
+                            }
+                        } else {
+                            return Err(PrismError::compile_error(
+                                format!("Method '{}' not found on facet '{}'", method, type_name),
+                                &receiver.span,
+                                &get_source_line(&self.source, receiver.span.line),
+                            ));
+                        }
+                    }
+                }
+
                 self.compile_expr(receiver)?;
                 self.emit(Op::GetMethod(method.clone()));
                 self.emit(Op::Call(args.len() + 1));
@@ -705,7 +831,7 @@ impl Compiler {
                 if let Expr::Identifier(name) = &callee.node {
                     let expected_arity = match self.globals.get(name) {
                         Some(Value::Function(func)) => Some(func.borrow().arity),
-                        _ => self.context.resolve_local(name).and_then(|slot| {
+                        _ => self.context.resolve_local(name).and_then(|(slot, _)| {
                             match self.context.function.borrow().chunk.constants.get(slot) {
                                 Some(Value::Function(func)) => Some(func.borrow().arity),
                                 _ => None,
@@ -757,7 +883,7 @@ impl Compiler {
 
                 let nested = Rc::new(RefCell::new(Compiler {
                     source: self.source.clone(),
-                    ast: body.clone(),
+                    module: Module { body: body.clone() },
                     globals: self.globals.clone(),
                     context: CompilerContext {
                         function: function.clone(),
@@ -769,11 +895,14 @@ impl Compiler {
                     enclosing: Some(parent),
                     loop_stack: vec![],
                     type_defs: self.type_defs.clone(),
-                    methods: self.methods.clone(),
+                    refraction_methods: self.refraction_methods.clone(),
                 }));
 
                 for (param_name, _) in params.iter() {
-                    nested.borrow_mut().context.declare_local(param_name);
+                    nested
+                        .borrow_mut()
+                        .context
+                        .declare_local(param_name, Expr::Identifier(param_name.to_string()));
                 }
 
                 nested.borrow_mut().context.begin_scope();
@@ -813,6 +942,7 @@ impl Compiler {
             BinaryOp::LessEqual => Op::LessEqual,
             BinaryOp::Greater => Op::Greater,
             BinaryOp::GreaterEqual => Op::GreaterEqual,
+            BinaryOp::StarStar => Op::Pow,
         }
     }
 
@@ -820,7 +950,7 @@ impl Compiler {
         if let Some(enclosing_rc) = &self.enclosing {
             let mut enclosing = enclosing_rc.borrow_mut();
 
-            if let Some(local_index) = enclosing.context.resolve_local(name) {
+            if let Some((local_index, _)) = enclosing.context.resolve_local(name) {
                 return Some(self.context.add_upvalue(true, local_index));
             }
 
@@ -853,6 +983,47 @@ impl Compiler {
             .push(value);
         self.context.function.borrow_mut().chunk.constants.len() - 1
     }
+
+    /// Returns the “zero” (default-initialized) runtime Value for a Lux type.
+    /// Used when a `let` variable is declared without an explicit initializer.
+    fn get_zero_value(&self, ty: &LuxType) -> Value {
+        match ty {
+            // ─ primitive types ────────────────────────────
+            LuxType::Light => Value::Light(0.0),
+            LuxType::Photon => Value::Photon(false),
+            LuxType::Lumens => Value::Lumens(String::new()),
+            LuxType::Umbra => Value::Umbra,
+
+            // ─ composite types ────────────────────────────
+            LuxType::Array(_) => Value::Array(Rc::new(RefCell::new(Vec::new()))),
+
+            LuxType::Map(_, _) => Value::Map(Rc::new(RefCell::new(HashMap::new()))),
+
+            // ─ named / user-defined types ─────────────────
+            LuxType::Named(name) => match self.type_defs.get(name) {
+                // type alias -> delegate to aliased type
+                Some(TypeDef::Alias(aliased)) => self.get_zero_value(aliased),
+
+                // facets behave like Go structs: default is nil / Umbra
+                Some(TypeDef::Facet { .. }) => Value::Umbra,
+
+                // unresolved -> warn, fall back to Umbra
+                None => {
+                    eprintln!(
+                        "Warning: could not resolve type '{}', defaulting to Umbra",
+                        name
+                    );
+                    Value::Umbra
+                }
+            },
+
+            // catch-all for future variants
+            _ => {
+                eprintln!("Warning: unhandled type '{:?}', defaulting to Umbra", ty);
+                Value::Umbra
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -865,7 +1036,7 @@ struct UpvalueInfo {
 pub struct CompilerContext {
     pub function: Rc<RefCell<Function>>,
     upvalues: Vec<UpvalueInfo>,
-    scopes: Vec<HashMap<String, usize>>,
+    scopes: Vec<HashMap<String, (usize, Expr)>>,
     is_global_scope: bool,
     next_slot: usize,
 }
@@ -879,22 +1050,22 @@ impl CompilerContext {
         self.scopes.pop();
     }
 
-    pub fn declare_local(&mut self, name: &str) -> usize {
+    pub fn declare_local(&mut self, name: &str, expr: Expr) -> usize {
         let index = self.next_slot;
         self.next_slot += 1;
 
         self.scopes
             .last_mut()
             .unwrap()
-            .insert(name.to_string(), index);
+            .insert(name.to_string(), (index, expr));
 
         index
     }
 
-    pub fn resolve_local(&self, name: &str) -> Option<usize> {
+    pub fn resolve_local(&self, name: &str) -> Option<(usize, Expr)> {
         for scope in self.scopes.iter().rev() {
-            if let Some(&index) = scope.get(name) {
-                return Some(index);
+            if let Some(&(index, ref expr)) = scope.get(name) {
+                return Some((index, expr.clone()));
             }
         }
         None

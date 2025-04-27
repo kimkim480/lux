@@ -8,4 +8,5 @@ log
 *.md
 !README.md
 !doc.md
-.aider*
+
+*.data

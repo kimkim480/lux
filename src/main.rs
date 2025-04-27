@@ -1,21 +1,20 @@
-mod ast;
-mod compiler;
+mod bytecode;
+mod cli;
+mod codegen;
 mod constants;
 mod error;
-mod lexer;
-mod parser;
-mod prism;
-mod token;
-mod typechecker;
-mod value;
+mod syntax;
+mod tir;
+mod typecheck;
+mod types;
+mod vm;
 
-use compiler::Compiler;
-use lexer::Lexer;
-use parser::Parser;
-use prism::Prism;
-use std::{env, fs};
-use typechecker::TypeChecker;
-use value::{CallFrame, TypeDef};
+use clap::Parser;
+use cli::{Cli, Cmd, EmitStage};
+use codegen::Compiler;
+use syntax::{Lexer, Parser as SyntaxParser};
+use typecheck::TypeChecker;
+use vm::{CallFrame, Prism, TypeDef};
 
 fn main() {
     if let Err(err) = try_main() {
@@ -25,63 +24,49 @@ fn main() {
 }
 
 fn try_main() -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: Use clap for argument parsing
-    // collect arguments (excluding program name)
-    let args: Vec<String> = env::args().skip(1).collect();
-    // flags
-    let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
-    let version = args.iter().any(|arg| arg == "--version" || arg == "-v");
-    let help = args.iter().any(|arg| arg == "--help" || arg == "-h");
+    let cli = Cli::parse();
 
-    // version request: print version and exit
-    if version {
-        println!("Lux v0.0.1-alpha.1");
-        return Ok(());
+    match cli.command {
+        Cmd::Run { file, emit } => run_program(file.display().to_string(), cli.debug, emit),
+        _ => todo!(),
     }
+}
 
-    // help or no args: print usage and exit
-    if help || args.is_empty() {
-        println!("Usage: lux <filename>");
-        println!("Options:");
-        println!("  --debug, -d    Enable debug mode (lux <filename> -d)");
-        println!("  --version, -v  Show version information");
-        println!("  --help, -h     Show this help message");
-        return Ok(());
+fn run_program(
+    file: String,
+    debug: bool,
+    emit: Option<EmitStage>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source =
+        std::fs::read_to_string(&file).map_err(|e| format!("Could not read '{}': {e}", file))?;
+
+    // FIXME: Pipeline flow
+    let lexer = Lexer::new(&source, &file);
+    let mut parser = SyntaxParser::new(&file, &source, lexer);
+    let ast_module = parser.parse()?;
+
+    match emit {
+        Some(EmitStage::Ast) => {
+            println!("{:?}", ast_module);
+            return Ok(());
+        }
+        _ => {}
     }
-
-    // first non-flag argument is filename; if missing, show help
-    let filename = if let Some(f) = args.iter().find(|arg| !arg.starts_with('-')) {
-        f
-    } else {
-        println!("Usage: lux <filename>");
-        println!("Options:");
-        println!("  --debug, -d    Enable debug mode (lux <filename> -d)");
-        println!("  --version, -v  Show version information");
-        println!("  --help, -h     Show this help message");
-        return Ok(());
-    };
-    let source = fs::read_to_string(&filename)
-        .map_err(|e| format!("Could not read file '{}': {}", filename, e))?;
-
-    // TODO: adjust the pipeline
-    let lexer = Lexer::new(&source, &filename);
-    let mut parser = Parser::new(&filename, lexer);
-    let ast = parser.parse()?;
 
     let mut type_checker = TypeChecker::new(&source);
-    type_checker.check(&ast)?;
+    let checked_module = type_checker.check(ast_module.clone())?;
 
-    let compiler = Compiler::new(&source, ast);
-    compiler.borrow_mut().type_defs = type_checker.type_defs;
+    let code_gen = Compiler::new(&source, checked_module.ast);
+    code_gen.borrow_mut().type_defs = type_checker.type_defs.clone();
 
-    let _start = compiler.borrow_mut().compile()?;
+    let _start = code_gen.borrow_mut().compile()?;
 
     let mut prism = Prism::new();
     prism.debug_trace = debug;
-    prism.globals = compiler.borrow().globals.clone();
-    prism.methods = compiler.borrow().methods.clone();
-    prism.facet_layouts = compiler
-        .borrow()
+    prism.globals = code_gen.borrow_mut().globals.clone();
+    prism.refraction_methods = code_gen.borrow_mut().refraction_methods.clone();
+    prism.facet_layouts = code_gen
+        .borrow_mut()
         .type_defs
         .iter()
         .filter_map(|(name, def)| {

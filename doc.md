@@ -1,163 +1,128 @@
 # Lux Token Specification
 
-This document outlines the complete set of tokens used in the Lux programming language.
+> ⚠️ **Status:** Lux is under heavy development. Some tokens and features are recognised by the _parser_ but are **not yet implemented** in the compiler or VM. Those are marked **(reserved)** or described in **Planned** sections.
 
 ---
 
 ## 🔤 Literals
 
-These are direct values or identifiers in the source code.
-
-- `Identifier(String)` — user-defined names for variables, functions, types, etc.
-- `Number(f64)` — numeric literals (e.g. `42`, `3.14`)
-- `String(String)` — string literals (e.g. `"hello"`)
-- `True` — boolean literal `true`
-- `False` — boolean literal `false`
+- `Identifier(String)` — user‑defined names (variables, functions, types…)
+- `Number(f64)` — numeric literals (`42`, `3.14`)
+- `String(String)` — string literals (`"hello"`)
+- `True` / `False` — boolean literals
 
 ---
 
 ## 🗝️ Keywords
 
-Reserved words that define the structure of Lux programs.
-
-- `Let` — variable binding (not allowed at global scope)
-- `Const` — constant binding (allowed at global scope)
-- `Fn` — function definition
-- `Return` — function return statement
-- `If` — conditional branching
-- `Else` — alternate conditional branch
-- `For` — loop construct
-- `Switch` — pattern matching/multi-branching
-- `Case` — branch condition in a `switch`
-- `Default` — fallback branch in a `switch`
-- `Break` — exit from loops or switches
-- `Continue` — skip to next iteration in loops
-- `Refraction` — create an alias or new type
-- `Facet` — structured data type
-- `Interface` — contract type
-- `Import` — bring external module
-- `As` — rename on import
+| Keyword                     | Purpose                                   | Implementation Status                    |
+| --------------------------- | ----------------------------------------- | ---------------------------------------- |
+| `Let`                       | variable binding (⛔ not at global scope) | ✅                                       |
+| `Const`                     | constant binding (allowed globally)       | ✅                                       |
+| `Fn`                        | function definition                       | ✅                                       |
+| `Return`                    | return from a function                    | ✅                                       |
+| `If`, `Else`                | conditional branching                     | ✅                                       |
+| `For`                       | loop construct                            | ✅                                       |
+| `Switch`, `Case`, `Default` | multi‑branching                           | ✅                                       |
+| `Break`, `Continue`         | loop control                              | ✅                                       |
+| `Refraction`                | type alias / named type                   | ✅                                       |
+| `Facet`                     | structured data type                      | ✅                                       |
+| `Interface`                 | contract type                             | **(reserved)**                           |
+| `Constellation`             | declares a module                         | **Parser‑only** — semantic linking _TBD_ |
+| `Import`, `As`              | bring external module, rename             | **(reserved)** — not parsed yet          |
 
 ---
 
 ## 🧬 Native Types
 
-Built-in types recognized by the Lux VM.
-
-- `Umbra` — the absence of a value (null/nil)
-- `Light` — number type (f64)
-- `Lumens` — string type
-- `Photon` — boolean type
-- `[T]` — array of values of type `T`
-- `Function([T], T)` — function taking arguments of type `[T]` and returning type `T`
-- `(T) -> U` — alternate syntax for function types
+| Lux Type           | Conventional Equivalent | Purpose                                                                |
+| ------------------ | ----------------------- | ---------------------------------------------------------------------- |
+| `Umbra`            | `void`/`nil`            | absence of value                                                       |
+| `Light`            | `int`/`float`           | numeric values                                                         |
+| `Lumens`           | `string`                | textual data                                                           |
+| `Photon`           | `bool`                  | truth values                                                           |
+| `[T]`              | `Array<T>`              | homogeneous collections (indexing supported; `push`/`pop` **planned**) |
+| `Function([T], T)` | `fn(T) -> T`            | function type                                                          |
 
 ---
 
 ## ⚙️ Native Functions
 
-Built-in functions available globally.
+Currently only one builtin:
 
-- `Emit` — output/print a value (Lux's version of `print`)
+- `emit(value)` — print a value (Lux’s `print`)
+
+Additional std‑lib style functions will arrive with the module system.
 
 ---
 
 ## ➕ Operators
 
-Tokens representing arithmetic, comparison, and logical operations.
+### Arithmetic
 
-### Arithmetic:
+`+  –  *  /  %`
 
-- `+` — addition
-- `-` — subtraction or negation
-- `*` — multiplication
-- `/` — division
-- `%` — modulo
+### Comparison
 
-### Comparison:
+`==  !=  <  <=  >  >=`
 
-- `==` — equality
-- `!=` — inequality
-- `<` — less than
-- `<=` — less than or equal
-- `>` — greater than
-- `>=` — greater than or equal
+### Logical
 
-### Logical:
+`!  &&  ||`
 
-- `!` — logical not
-- `&&` — logical and
-- `||` — logical or
+### Assignment
 
-### Assignment:
-
-- `=` — assignment
+`=`
 
 ---
 
 ## ⚖️ Operator Precedence & Associativity
 
-Defines how operators group when parentheses are not used (from highest to lowest).
-
-| Precedence | Operators            | Description               | Associativity |
-| ---------- | -------------------- | ------------------------- | ------------- |
-| 7          | `!`, `-`             | Logical NOT, unary prefix | Right-to-left |
-| 6          | `*`, `/`, `%`        | Multiplicative            | Left-to-right |
-| 5          | `+`, `-`             | Additive                  | Left-to-right |
-| 4          | `<`, `<=`, `>`, `>=` | Comparison                | Left-to-right |
-| 3          | `==`, `!=`           | Equality                  | Left-to-right |
-| 2          | `&&`                 | Logical AND               | Left-to-right |
-| 1          | `\|\|`               | Logical OR                | Left-to-right |
-| 0          | `=`                  | Assignment                | Right-to-left |
+| Precedence | Operators            | Associativity |
+| ---------- | -------------------- | ------------- |
+| 7          | `!`, unary `-`       | Right‑to‑left |
+| 6          | `*`, `/`, `%`        | Left‑to‑right |
+| 5          | `+`, `-`             | Left‑to‑right |
+| 4          | `<`, `<=`, `>`, `>=` | Left‑to‑right |
+| 3          | `==`, `!=`           | Left‑to‑right |
+| 2          | `&&`                 | Left‑to‑right |
+| 1          | `\|\|`               | Left‑to‑right |
+| 0          | `=`                  | Right‑to‑left |
 
 ---
 
-## 💡 Notes
+## 🌌 Module System — **Planned Design**
 
-- Tokens are defined in the lexer and used by the parser for syntactic structure.
-- Native types and functions are treated specially during compilation.
-- Operator precedence and associativity guide parsing of expressions.
-- This list may grow as the standard library evolves.
+`Constellation` and `import` outline Lux’s future modular architecture, but linker‑level semantics are **not yet live**. The current compiler treats each `.lux` file as a standalone program.
 
----
+### Planned Rules
 
-## 🌌 Module System (Constellations)
+1. **Constellation blocks a folder**: every `.lux` file in the same directory shares the same namespace.
+2. Global `const` values are visible across files in the same constellation — no `import` needed.
+3. To reference another folder’s constellation, use `import "name"` (syntax reserved).
 
-In Lux, source files are grouped into modules using the `Constellation` keyword.
-
-### 💫 Visibility Rules
-
-- All files inside the same folder are part of the same `Constellation`.
-- Global `const` bindings are **shared across files** in the same `Constellation` — no `import` needed.
-- To access definitions from a different folder, you must explicitly `import` that `Constellation`.
-
-### 📁 Example
-
-```
+```text
 src/
-├── main.lux → import "std"
+├── main.lux        # import "std"   (planned)
 └── std/
-    ├── math.lux → Constellation std
-    └── geometry.lux → Constellation std
+    ├── math.lux    # constellation std;
+    └── geometry.lux
 ```
+
+Once implemented your code will look like:
 
 ```lux
 // std/math.lux
-Constellation std;
+constellation std;
 
 const PI: Light = 3.1415;
-
-// std/geometry.lux
-// No import needed, same constellation
-
-const TWOPI = PI * 2;
 
 // main.lux
 import "std";
 
-emit std.TWOPI; // OK
+emit std.PI;
 ```
 
 ---
 
-Last updated: Apr 15, 2025
+_Last updated: Apr 18 2025_

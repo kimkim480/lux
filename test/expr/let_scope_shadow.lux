@@ -5,5 +5,5 @@ fn Prism() {
   emit a;
 
   let a: Light = a + 1;
-  emit a; // test: <💥 Compile error: Variable 'a' already declared in this scope>
+  emit a; // test: <🚨 Type error: Cannot redefine variable 'a' in local scope>
 }
